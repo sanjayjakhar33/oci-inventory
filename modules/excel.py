@@ -1,5 +1,11 @@
-"""Excel export helpers."""
+from openpyxl import Workbook
 
 
-def export_to_excel(data, output_path: str):
-    return output_path
+def create_workbook():
+
+    wb = Workbook()
+
+    default = wb.active
+    wb.remove(default)
+
+    return wb
