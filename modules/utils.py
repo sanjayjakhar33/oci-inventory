@@ -69,12 +69,16 @@ def to_iso_string(value: Any) -> str:
 
 
 class InventoryCache:
-    """Small cache used to avoid duplicate VCN, subnet, and NSG lookups."""
+    """In-memory caches used to avoid repeated OCI lookups for related resources."""
 
     def __init__(self) -> None:
         self.vcns: dict[str, dict[str, Any]] = {}
         self.subnets: dict[str, dict[str, Any]] = {}
         self.nsgs: dict[str, dict[str, Any]] = {}
+        self.route_tables: dict[str, dict[str, Any]] = {}
+        self.security_lists: dict[str, dict[str, Any]] = {}
+        self.dhcp_options: dict[str, dict[str, Any]] = {}
+        self.cpes: dict[str, dict[str, Any]] = {}
 
     def cache_vcn(self, vcn_id: str, payload: dict[str, Any]) -> None:
         if vcn_id:
@@ -97,7 +101,40 @@ class InventoryCache:
     def get_nsg(self, nsg_id: str) -> dict[str, Any] | None:
         return self.nsgs.get(nsg_id)
 
+    def cache_route_table(self, route_table_id: str, payload: dict[str, Any]) -> None:
+        if route_table_id:
+            self.route_tables[route_table_id] = payload
+
+    def get_route_table(self, route_table_id: str) -> dict[str, Any] | None:
+        return self.route_tables.get(route_table_id)
+
+    def cache_security_list(self, security_list_id: str, payload: dict[str, Any]) -> None:
+        if security_list_id:
+            self.security_lists[security_list_id] = payload
+
+    def get_security_list(self, security_list_id: str) -> dict[str, Any] | None:
+        return self.security_lists.get(security_list_id)
+
+    def cache_dhcp_options(self, dhcp_options_id: str, payload: dict[str, Any]) -> None:
+        if dhcp_options_id:
+            self.dhcp_options[dhcp_options_id] = payload
+
+    def get_dhcp_options(self, dhcp_options_id: str) -> dict[str, Any] | None:
+        return self.dhcp_options.get(dhcp_options_id)
+
+    def cache_cpe(self, cpe_id: str, payload: dict[str, Any]) -> None:
+        if cpe_id:
+            self.cpes[cpe_id] = payload
+
+    def get_cpe(self, cpe_id: str) -> dict[str, Any] | None:
+        return self.cpes.get(cpe_id)
+
 
 def normalize_resource(resource: dict[str, Any]) -> dict[str, Any]:
     """Return a small, workbook-friendly resource dictionary."""
     return {key: safe_value(value) for key, value in resource.items()}
+
+
+def join_values(values: list[Any] | tuple[Any, ...] | set[Any]) -> str:
+    """Join values consistently for workbook cells."""
+    return ", ".join(str(value) for value in values if value not in (None, ""))
