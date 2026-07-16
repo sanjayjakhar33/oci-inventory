@@ -120,13 +120,6 @@ class DatabaseCollector:
             logger.warning("Unable to list DB nodes for DB system %s: %s", db_system_id, exc)
             return []
 
-    def _paginate(self, list_method: Any, **kwargs: Any) -> list[Any]:
-        try:
-            response = list_call_get_all_results(list_method, **kwargs)
-            return response.data if hasattr(response, 'data') else []
-        except Exception as exc:
-            logger.warning("Unable to paginate '%s': %s", getattr(list_method, "__name__", str(list_method)), exc)
-            return []
 
     def _build_db_home_row(self, db_home: Any) -> dict[str, Any]:
         """Build a row for a DB Home resource."""
