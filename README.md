@@ -140,3 +140,475 @@ Allow group <group-name> to read iam in compartment <target-compartment>
 ## Safety statement
 
 This repository is intentionally implemented as a read-only inventory tool. It uses OCI SDK `GET` and `LIST` APIs only. No OCI Create, Update, Delete, or Action APIs are used anywhere in the repository.
+
+
+# OCI Inventory Generator
+
+A **read-only OCI Inventory Generator** built using the Oracle Cloud Infrastructure (OCI) Python SDK.
+
+This tool inventories an OCI compartment and exports the complete infrastructure inventory into a formatted Excel workbook.
+
+**No resources are created, modified, or deleted.**
+
+---
+
+# Features
+
+Collects inventory for:
+
+- Compute Instances
+- VNICs
+- Private/Public IPs
+- Network Security Groups (NSGs)
+- VCNs
+- Subnets
+- Route Tables
+- Security Lists
+- Internet Gateways
+- NAT Gateways
+- Service Gateways
+- DRGs
+- DRG Attachments
+- Remote Peering Connections
+- Local Peering Gateways
+- DB Systems
+- Load Balancers
+- Buckets
+- Block Volumes
+- Boot Volumes
+- WAF Policies
+- DNS Zones
+- IPSec VPNs
+- CPEs
+- IAM Policies
+
+Exports everything into a single Excel workbook with separate worksheets.
+
+---
+
+# Safety
+
+This project is **100% Read Only**.
+
+It only uses OCI SDK **GET** and **LIST** APIs.
+
+No changes are made to your OCI tenancy.
+
+No resource creation.
+
+No deletion.
+
+No updates.
+
+Safe to execute against Production environments (with read-only permissions).
+
+---
+
+# Requirements
+
+- OCI Cloud Shell (Recommended)
+- Python 3.9+
+- OCI CLI (already available in Cloud Shell)
+- OCI SDK
+
+---
+
+# Repository
+
+Clone the repository:
+
+```bash
+git clone https://github.com/sanjayjakhar33/oci-inventory.git
+```
+
+Enter the directory:
+
+```bash
+cd oci-inventory
+```
+
+---
+
+# Install Dependencies
+
+Install Python dependencies.
+
+```bash
+pip3 install -r requirements.txt
+```
+
+---
+
+# Verify OCI Authentication
+
+Cloud Shell is automatically authenticated.
+
+Verify by running:
+
+```bash
+oci os ns get
+```
+
+Expected output:
+
+```json
+{
+  "data": "<namespace>"
+}
+```
+
+If this works, authentication is successful.
+
+---
+
+# Verify Region
+
+Check the active OCI region.
+
+```bash
+echo $OCI_REGION
+```
+
+or
+
+```bash
+oci iam region list
+```
+
+---
+
+# Run the Inventory Tool
+
+Execute:
+
+```bash
+python3 main.py
+```
+
+---
+
+# Provide Input
+
+The tool will prompt for:
+
+```
+Compartment Name:
+```
+
+Example
+
+```
+Ambajogai
+```
+
+Next
+
+```
+Compartment OCID:
+```
+
+Example
+
+```
+ocid1.compartment.oc1..xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+Next
+
+```
+Region
+```
+
+Example
+
+```
+ap-hyderabad-1
+```
+
+Leave blank to use the current Cloud Shell region (if supported).
+
+---
+
+# Inventory Collection
+
+The tool will collect information for:
+
+```
+Compute
+
+Database
+
+Networking
+
+Storage
+
+Load Balancer
+
+VPN
+
+DNS
+
+WAF
+
+Policies
+```
+
+Progress is displayed while collecting resources.
+
+Example:
+
+```
+Collecting Compute...
+
+Collecting Database...
+
+Collecting Networking...
+
+Collecting VPN...
+
+Collecting Storage...
+
+Collecting DNS...
+
+Collecting WAF...
+
+Generating Excel...
+
+Completed Successfully.
+```
+
+---
+
+# Output
+
+The generated workbook will be created inside:
+
+```
+output/
+```
+
+Example
+
+```
+output/
+
+OCI_Inventory_Ambajogai.xlsx
+```
+
+---
+
+# Download the Excel File
+
+List generated files.
+
+```bash
+ls -lh output
+```
+
+Use the OCI Cloud Shell File Browser to download:
+
+```
+output/OCI_Inventory_<Compartment>.xlsx
+```
+
+---
+
+# Validate Python Files (Optional)
+
+Check for syntax errors.
+
+```bash
+python3 -m py_compile main.py
+```
+
+Validate all Python files.
+
+```bash
+find . -name "*.py" -exec python3 -m py_compile {} \;
+```
+
+No output means all files compiled successfully.
+
+---
+
+# Typical Execution Flow
+
+```text
+Open OCI Cloud Shell
+        │
+        ▼
+Clone Repository
+        │
+        ▼
+Install Requirements
+        │
+        ▼
+Run main.py
+        │
+        ▼
+Enter Compartment Name
+        │
+        ▼
+Enter Compartment OCID
+        │
+        ▼
+Enter Region
+        │
+        ▼
+Collect OCI Inventory
+        │
+        ▼
+Generate Excel Workbook
+        │
+        ▼
+Download Excel File
+```
+
+---
+
+# Example
+
+```bash
+git clone https://github.com/sanjayjakhar33/oci-inventory.git
+
+cd oci-inventory
+
+pip3 install -r requirements.txt
+
+python3 main.py
+```
+
+Example Input
+
+```
+Compartment Name
+
+Ambajogai
+
+Compartment OCID
+
+ocid1.compartment.oc1..aaaaaaaavjwd6hbdvyf7fprwpsegwab4s6jhrgqobdxzowj5klpvyfjg5mkq
+
+Region
+
+ap-hyderabad-1
+```
+
+---
+
+# Excel Workbook
+
+The generated workbook contains worksheets similar to:
+
+```
+Summary
+
+Compute
+
+Database
+
+VCN
+
+Subnets
+
+NSGs
+
+Gateways
+
+DRGs
+
+Remote Peering
+
+Load Balancer
+
+Storage
+
+DNS
+
+WAF
+
+VPN
+
+Policies
+```
+
+---
+
+# Troubleshooting
+
+## Authentication Error
+
+Verify Cloud Shell authentication.
+
+```bash
+oci os ns get
+```
+
+---
+
+## Permission Error
+
+Ensure the executing user has read permissions for the target compartment.
+
+---
+
+## No Resources Found
+
+Verify:
+
+- Correct Compartment OCID
+- Correct Region
+- Resources exist in the selected compartment
+
+---
+
+## Python Module Error
+
+Reinstall dependencies.
+
+```bash
+pip3 install -r requirements.txt
+```
+
+---
+
+## Output Not Generated
+
+Verify the output directory exists.
+
+```bash
+ls output
+```
+
+---
+
+# IAM Permissions
+
+Recommended minimum permissions:
+
+- inspect compartments
+- inspect instances
+- inspect virtual-network-family
+- inspect volume-family
+- inspect database-family
+- inspect object-family
+- inspect load-balancers
+- inspect waas-family
+- inspect dns
+- inspect policies
+
+Read-only access is sufficient.
+
+---
+
+# License
+
+MIT License
+
+---
+
+# Disclaimer
+
+This project is intended for inventory and reporting purposes only.
+
+It performs **read-only** operations against OCI using the Oracle Cloud Infrastructure Python SDK and does **not** modify any OCI resources.
