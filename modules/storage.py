@@ -37,7 +37,13 @@ class StorageCollector:
                 self.manager.object_storage_client.list_buckets,
                 namespace_name=namespace,
                 compartment_id=compartment_id,
-                fields=["name", "compartment_id"],
+                fields=[
+    "name",
+    "compartmentId",
+    "timeCreated",
+    "approximateSize",
+    "approximateCount",
+]
             ):
                 rows.append({
                     "Resource Type": "Bucket",
