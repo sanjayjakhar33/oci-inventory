@@ -29,7 +29,35 @@ class LoadBalancerCollector:
                     for address in getattr(lb, "ip_addresses", [])
                     if getattr(address, "ip_address", None)
                 ]
+                backend_sets = self._paginate(
+                    self.manager.load_balancer_client.list_backend_sets,
+                    load_balancer_id=getattr(load_balancer, "id", ""),
+                )
+                backend_rows = []
+                for backend_set in backend_sets:
+                    backend_names = []
+                    for backend in self._paginate(
+                        self.manager.load_balancer_client.list_backends,
+                        load_balancer_id=getattr(load_balancer, "id", ""),
+                        backend_set_name=getattr(backend_set, "name", ""),
+                    ):
+                        backend_names.append(getattr(backend, "name", ""))
+                    backend_rows.append(f"{getattr(backend_set, 'name', '')}: {', '.join(backend_names)}")
+
+                listener_rows = []
+                for certificate in self._paginate(
+                    self.manager.load_balancer_client.list_certificates,
+                    load_balancer_id=getattr(load_balancer, "id", ""),
+                ):
+                    listener_rows.append(f"Certificate: {getattr(certificate, 'display_name', '')}")
+                for hostname in self._paginate(
+                    self.manager.load_balancer_client.list_hostnames,
+                    load_balancer_id=getattr(load_balancer, "id", ""),
+                ):
+                    listener_rows.append(f"Hostname: {getattr(hostname, 'hostname', '')}")
+
                 rows.append({
+                    "Resource Type": "Load Balancer",
                     "LB Name": getattr(lb, "display_name", ""),
                     "OCID": getattr(lb, "id", ""),
                     "Private IP": "",
@@ -37,10 +65,10 @@ class LoadBalancerCollector:
                     "Shape": getattr(lb, "shape_name", ""),
                     "Subnet": getattr(load_balancer, "subnet_ids", [""])[0],
                     "VCN": "",
-                    "NSGs": "",
-                    "Backend Sets": "",
+                    "NSGs": ", ".join(getattr(load_balancer, "nsg_ids", []) or []),
+                    "Backend Sets": "; ".join(backend_rows),
                     "Backends": "",
-                    "Listeners": "",
+                    "Listeners": "; ".join(listener_rows),
                 })
             except Exception as exc:
                 logger.warning("Unable to inventory load balancer %s: %s", getattr(load_balancer, "id", ""), exc)

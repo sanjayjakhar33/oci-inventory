@@ -21,22 +21,67 @@ class DatabaseCollector:
 
     def collect(self, compartment_id: str) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
-        for db_system in self._list_db_systems(compartment_id):
+        rows.extend(self._collect_db_systems(compartment_id))
+        rows.extend(self._collect_db_homes(compartment_id))
+        rows.extend(self._collect_databases(compartment_id))
+        rows.extend(self._collect_db_nodes(compartment_id))
+        return rows
+
+    def _collect_db_systems(self, compartment_id: str) -> list[dict[str, Any]]:
+        rows = []
+        for db_system in self._paginate(self.manager.database_client.list_db_systems, compartment_id=compartment_id):
             try:
                 rows.append(self._build_db_system_row(db_system))
             except Exception as exc:
                 logger.exception("Failed to inventory DB system %s: %s", getattr(db_system, "id", "unknown"), exc)
         return rows
 
-    def _list_db_systems(self, compartment_id: str) -> list[Any]:
+    def _collect_db_homes(self, compartment_id: str) -> list[dict[str, Any]]:
+        rows = []
+        for db_home in self._paginate(self.manager.database_client.list_db_homes, compartment_id=compartment_id):
+            rows.append({
+                "Resource Type": "DB Home",
+                "Name": getattr(db_home, "display_name", ""),
+                "OCID": getattr(db_home, "id", ""),
+                "DB System": getattr(db_home, "db_system_id", ""),
+                "Lifecycle": getattr(db_home, "lifecycle_state", ""),
+            })
+        return rows
+
+    def _collect_databases(self, compartment_id: str) -> list[dict[str, Any]]:
+        rows = []
+        for database in self._paginate(self.manager.database_client.list_databases, compartment_id=compartment_id):
+            rows.append({
+                "Resource Type": "Database",
+                "Name": getattr(database, "db_name", ""),
+                "OCID": getattr(database, "id", ""),
+                "DB Home": getattr(database, "db_home_id", ""),
+                "Lifecycle": getattr(database, "lifecycle_state", ""),
+            })
+        return rows
+
+    def _collect_db_nodes(self, compartment_id: str) -> list[dict[str, Any]]:
+        rows = []
+        for db_node in self._paginate(self.manager.database_client.list_db_nodes, compartment_id=compartment_id):
+            rows.append({
+                "Resource Type": "DB Node",
+                "Name": getattr(db_node, "hostname", ""),
+                "OCID": getattr(db_node, "id", ""),
+                "Lifecycle": getattr(db_node, "lifecycle_state", ""),
+                "Availability Domain": getattr(db_node, "availability_domain", ""),
+            })
+        return rows
+
+    def _paginate(self, list_method: Any, **kwargs: Any) -> list[Any]:
         try:
-            return list(list_call_get_all_results(self.manager.database_client.list_db_systems, compartment_id=compartment_id))
+            return list(list_call_get_all_results(list_method, **kwargs))
         except Exception as exc:
-            logger.warning("Unable to list DB systems in compartment %s: %s", compartment_id, exc)
+            logger.warning("Unable to paginate '%s': %s", getattr(list_method, "__name__", str(list_method)), exc)
             return []
 
     def _build_db_system_row(self, db_system: Any) -> dict[str, Any]:
         row = {
+            "Resource Type": "DB System",
             "DB System": getattr(db_system, "display_name", ""),
             "DB System OCID": getattr(db_system, "id", ""),
             "Database Name": "",

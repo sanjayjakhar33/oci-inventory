@@ -33,7 +33,7 @@ console = Console()
 logger = logging.getLogger(__name__)
 
 
-def prompt_for_inputs() -> tuple[str, str]:
+def prompt_for_inputs() -> tuple[str, str, str, str]:
     """Prompt the user for the target compartment details.
 
     If environment variables are already present, they are used to avoid
@@ -42,22 +42,34 @@ def prompt_for_inputs() -> tuple[str, str]:
     console.print("[bold cyan]OCI Inventory Generator[/bold cyan]")
     compartment_name = os.getenv("OCI_COMPARTMENT_NAME") or Prompt.ask("Compartment Name", default="")
     compartment_ocid = os.getenv("OCI_COMPARTMENT_OCID") or Prompt.ask("Compartment OCID", default="")
-    return compartment_name, compartment_ocid
+    region = os.getenv("OCI_REGION") or Prompt.ask("Region (optional)", default=SETTINGS.get("region") or "")
+    output_dir = os.getenv("OCI_OUTPUT_DIR") or Prompt.ask("Output directory", default="./output")
+
+    if not compartment_name.strip():
+        raise ValueError("Compartment Name is required.")
+    if not compartment_ocid.strip():
+        raise ValueError("Compartment OCID is required.")
+    if not output_dir.strip():
+        output_dir = "./output"
+
+    if region.strip():
+        return compartment_name.strip(), compartment_ocid.strip(), region.strip(), output_dir.strip()
+    return compartment_name.strip(), compartment_ocid.strip(), "", output_dir.strip()
 
 
-def run_inventory(compartment_name: str, compartment_ocid: str) -> Path:
+def run_inventory(compartment_name: str, compartment_ocid: str, region: str, output_dir: str) -> Path:
     """Run all inventory collectors and export the workbook."""
     setup_logging()
-    logger.info("Starting OCI inventory for compartment '%s' (%s)", compartment_name, compartment_ocid)
+    logger.info("Starting OCI inventory for compartment '%s' (%s) in region '%s' exporting to '%s'", compartment_name, compartment_ocid, region or "profile default", output_dir)
 
     manager = OCIClientManager(
         profile=SETTINGS["profile"],
         config_file=SETTINGS["config_file"],
-        region=SETTINGS["region"],
+        region=region or SETTINGS.get("region"),
     )
 
     cache = InventoryCache()
-    builder = ExcelWorkbookBuilder()
+    builder = ExcelWorkbookBuilder(output_dir=output_dir)
 
     collectors = [
         ("Compute", ComputeCollector(manager, cache)),
@@ -110,8 +122,8 @@ def run_inventory(compartment_name: str, compartment_ocid: str) -> Path:
 
 
 def main() -> None:
-    compartment_name, compartment_ocid = prompt_for_inputs()
-    run_inventory(compartment_name=compartment_name, compartment_ocid=compartment_ocid)
+    compartment_name, compartment_ocid, region, output_dir = prompt_for_inputs()
+    run_inventory(compartment_name=compartment_name, compartment_ocid=compartment_ocid, region=region, output_dir=output_dir)
 
 
 if __name__ == "__main__":

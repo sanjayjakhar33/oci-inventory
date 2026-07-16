@@ -20,10 +20,11 @@ class OCIClientManager:
     """Manage and reuse OCI service clients for the inventory workflow."""
 
     def __init__(self, profile: str = "DEFAULT", config_file: str | None = None, region: str | None = None) -> None:
-        self.profile = profile
+        self.profile = profile or "DEFAULT"
         self.config_file = str(Path(config_file or "~/.oci/config").expanduser())
-        self.region = region or "us-ashburn-1"
         self._config = self._load_config()
+        resolved_region = region or self._config.get("region")
+        self.region = resolved_region
         self.compute_client = oci.core.ComputeClient(self._config, region=self.region)
         self.virtual_network_client = oci.core.VirtualNetworkClient(self._config, region=self.region)
         self.database_client = oci.database.DatabaseClient(self._config, region=self.region)

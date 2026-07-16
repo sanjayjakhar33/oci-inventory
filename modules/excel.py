@@ -50,14 +50,24 @@ class ExcelWorkbookBuilder:
         for module_name, rows in workbook_rows.items():
             ws.append([f"{module_name} Row Count", len(rows)])
 
-        for sheet_name, rows in workbook_rows.items():
-            sheet = wb.create_sheet(title=sanitize_sheet_name(sheet_name))
-            if rows:
-                headers = list(rows[0].keys())
+        for module_name, rows in workbook_rows.items():
+            grouped_rows: dict[str, list[dict[str, object]]] = {}
+            for row in rows:
+                resource_type = str(row.get("Resource Type", module_name)).strip() or module_name
+                grouped_rows.setdefault(resource_type, []).append(row)
+
+            if not grouped_rows:
+                sheet = wb.create_sheet(title=sanitize_sheet_name(module_name))
+                self._format_sheet(sheet)
+                continue
+
+            for resource_type, typed_rows in grouped_rows.items():
+                sheet = wb.create_sheet(title=sanitize_sheet_name(f"{module_name} - {resource_type}"))
+                headers = list(typed_rows[0].keys())
                 sheet.append(headers)
-                for row in rows:
+                for row in typed_rows:
                     sheet.append([safe_value(row.get(header, "")) for header in headers])
-            self._format_sheet(sheet)
+                self._format_sheet(sheet)
 
         self._format_sheet(ws)
         wb.save(workbook_path)

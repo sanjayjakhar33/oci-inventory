@@ -23,6 +23,7 @@ class VPNCollector:
         rows: list[dict[str, Any]] = []
         for cpe in self._paginate(self.manager.virtual_network_client.list_cpes, compartment_id=compartment_id):
             try:
+                self.cache.cache_cpe(getattr(cpe, "id", ""), cpe)
                 rows.append({
                     "Resource Type": "CPE",
                     "Name": getattr(cpe, "display_name", ""),
@@ -39,22 +40,27 @@ class VPNCollector:
                     ip_sec_connection_id=getattr(connection, "id", ""),
                 )
                 tunnel_rows = []
+                tunnel_ips = []
+                static_routes = []
                 for tunnel in tunnels:
                     tunnel_rows.append(
                         f"{getattr(tunnel, 'display_name', '')} ({getattr(tunnel, 'lifecycle_state', '')})"
                     )
+                    if getattr(tunnel, "vpn_ip", None):
+                        tunnel_ips.append(getattr(tunnel, "vpn_ip", ""))
+                    if getattr(tunnel, "route_tables", None):
+                        static_routes.extend(getattr(tunnel, "route_tables", []) or [])
                 rows.append({
                     "Resource Type": "IPSec Connection",
                     "Name": getattr(connection, "display_name", ""),
                     "OCID": getattr(connection, "id", ""),
                     "CPE Name": getattr(connection, "cpe_id", ""),
-                    "CPE Public IP": "",
+                    "CPE Public IP": getattr(self.cache.get_cpe(getattr(connection, "cpe_id", "")), "ip_address", "") if self.cache.get_cpe(getattr(connection, "cpe_id", "")) else "",
                     "Customer LAN CIDRs": ", ".join(getattr(connection, "customer_bgp_asn", []) or []),
                     "DRG": getattr(connection, "drg_id", ""),
-                    "Tunnel Public IPs": ", ".join(
-                        [getattr(tunnel, "vpn_ip", "") for tunnel in tunnels if getattr(tunnel, "vpn_ip", None)]
-                    ),
+                    "Tunnel Public IPs": ", ".join(tunnel_ips),
                     "Tunnel Status": "; ".join(tunnel_rows),
+                    "Static Routes": ", ".join(static_routes),
                 })
             except Exception as exc:
                 logger.warning("Unable to inventory IPSec connection %s: %s", getattr(connection, "id", ""), exc)

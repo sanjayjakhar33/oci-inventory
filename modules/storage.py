@@ -24,7 +24,9 @@ class StorageCollector:
         rows.extend(self._collect_buckets(compartment_id))
         rows.extend(self._collect_block_volumes(compartment_id))
         rows.extend(self._collect_boot_volumes(compartment_id))
+        rows.extend(self._collect_volume_groups(compartment_id))
         rows.extend(self._collect_volume_backups(compartment_id))
+        rows.extend(self._collect_volume_group_backups(compartment_id))
         return rows
 
     def _collect_buckets(self, compartment_id: str) -> list[dict[str, Any]]:
@@ -74,6 +76,18 @@ class StorageCollector:
             })
         return rows
 
+    def _collect_volume_groups(self, compartment_id: str) -> list[dict[str, Any]]:
+        rows = []
+        for volume_group in self._paginate(self.manager.blockstorage_client.list_volume_groups, compartment_id=compartment_id):
+            rows.append({
+                "Resource Type": "Volume Group",
+                "Name": getattr(volume_group, "display_name", ""),
+                "OCID": getattr(volume_group, "id", ""),
+                "Availability Domain": getattr(volume_group, "availability_domain", ""),
+                "Lifecycle": getattr(volume_group, "lifecycle_state", ""),
+            })
+        return rows
+
     def _collect_volume_backups(self, compartment_id: str) -> list[dict[str, Any]]:
         rows = []
         for backup in self._paginate(self.manager.blockstorage_client.list_volume_backups, compartment_id=compartment_id):
@@ -82,6 +96,18 @@ class StorageCollector:
                 "Name": getattr(backup, "display_name", ""),
                 "OCID": getattr(backup, "id", ""),
                 "Volume": getattr(backup, "volume_id", ""),
+                "Lifecycle": getattr(backup, "lifecycle_state", ""),
+            })
+        return rows
+
+    def _collect_volume_group_backups(self, compartment_id: str) -> list[dict[str, Any]]:
+        rows = []
+        for backup in self._paginate(self.manager.blockstorage_client.list_volume_group_backups, compartment_id=compartment_id):
+            rows.append({
+                "Resource Type": "Volume Group Backup",
+                "Name": getattr(backup, "display_name", ""),
+                "OCID": getattr(backup, "id", ""),
+                "Volume Group": getattr(backup, "volume_group_id", ""),
                 "Lifecycle": getattr(backup, "lifecycle_state", ""),
             })
         return rows
