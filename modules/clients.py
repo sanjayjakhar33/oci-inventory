@@ -38,7 +38,9 @@ class OCIClientManager:
     def _load_config(self) -> dict[str, Any]:
         """Load OCI config from the CLI profile."""
         logger.info("Loading OCI config from profile '%s' using %s", self.profile, self.config_file)
-        if not Path(self.config_file).expanduser().exists():
+        
+        config_path = Path(self.config_file).expanduser()
+        if not config_path.exists():
             raise FileNotFoundError(f"OCI config file not found: {self.config_file}")
 
         return oci.config.from_file(self.config_file, self.profile)

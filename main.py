@@ -60,6 +60,11 @@ def prompt_for_inputs() -> tuple[str, str, str, str]:
 def run_inventory(compartment_name: str, compartment_ocid: str, region: str, output_dir: str) -> Path:
     """Run all inventory collectors and export the workbook."""
     setup_logging()
+    
+    # Log Cloud Shell detection
+    if SETTINGS.get("is_cloud_shell"):
+        logger.info("Running in OCI Cloud Shell environment")
+    
     logger.info("Starting OCI inventory for compartment '%s' (%s) in region '%s' exporting to '%s'", compartment_name, compartment_ocid, region or "profile default", output_dir)
 
     manager = OCIClientManager(

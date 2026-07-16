@@ -317,7 +317,8 @@ class NetworkCollector:
 
     def _paginate(self, list_method: Any, **kwargs: Any) -> list[Any]:
         try:
-            return list(list_call_get_all_results(list_method, **kwargs))
+            response = list_call_get_all_results(list_method, **kwargs)
+            return response.data if hasattr(response, 'data') else []
         except Exception as exc:
             logger.warning("Failed to paginate '%s': %s", getattr(list_method, "__name__", str(list_method)), exc)
             return []

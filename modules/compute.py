@@ -37,20 +37,20 @@ class ComputeCollector:
 
     def _list_instances(self, compartment_id: str) -> list[Any]:
         try:
-            return list(list_call_get_all_results(self.manager.compute_client.list_instances, compartment_id=compartment_id))
+            response = list_call_get_all_results(self.manager.compute_client.list_instances, compartment_id=compartment_id)
+            return response.data if hasattr(response, 'data') else []
         except Exception as exc:
             self.logger.warning("Unable to list instances in compartment %s: %s", compartment_id, exc)
             return []
 
     def _list_vnic_attachments(self, compartment_id: str, instance_id: str) -> list[Any]:
         try:
-            return list(
-                list_call_get_all_results(
-                    self.manager.compute_client.list_vnic_attachments,
-                    compartment_id=compartment_id,
-                    instance_id=instance_id,
-                )
+            response = list_call_get_all_results(
+                self.manager.compute_client.list_vnic_attachments,
+                compartment_id=compartment_id,
+                instance_id=instance_id,
             )
+            return response.data if hasattr(response, 'data') else []
         except Exception as exc:
             self.logger.warning("Unable to list VNIC attachments for instance %s: %s", instance_id, exc)
             return []
@@ -108,13 +108,12 @@ class ComputeCollector:
 
     def _list_boot_volume_attachments(self, compartment_id: str, instance_id: str) -> list[Any]:
         try:
-            return list(
-                list_call_get_all_results(
-                    self.manager.compute_client.list_boot_volume_attachments,
-                    compartment_id=compartment_id,
-                    instance_id=instance_id,
-                )
+            response = list_call_get_all_results(
+                self.manager.compute_client.list_boot_volume_attachments,
+                compartment_id=compartment_id,
+                instance_id=instance_id,
             )
+            return response.data if hasattr(response, 'data') else []
         except Exception as exc:
             self.logger.warning("Unable to list boot volume attachments for instance %s: %s", instance_id, exc)
             return []
