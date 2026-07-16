@@ -93,15 +93,23 @@ class NetworkCollector:
                 "Lifecycle": getattr(drg, "lifecycle_state", ""),
             })
 
-        for attachment in self._paginate(self.manager.virtual_network_client.list_drg_attachments, compartment_id=compartment_id):
-            rows.append({
-                "Resource Type": "DRG Attachment",
-                "Name": getattr(attachment, "display_name", ""),
-                "OCID": getattr(attachment, "id", ""),
-                "DRG": getattr(attachment, "drg_id", ""),
-                "VCN": getattr(attachment, "vcn_id", ""),
-                "Lifecycle": getattr(attachment, "lifecycle_state", ""),
-            })
+        try:
+            response = self.manager.virtual_network_client.list_drg_attachments(
+                compartment_id=compartment_id
+            )
+
+            for attachment in response.data:
+                rows.append({
+                    "Resource Type": "DRG Attachment",
+                    "Name": getattr(attachment, "display_name", ""),
+                    "OCID": getattr(attachment, "id", ""),
+                    "DRG": getattr(attachment, "drg_id", ""),
+                    "VCN": getattr(attachment, "vcn_id", ""),
+                    "Lifecycle": getattr(attachment, "lifecycle_state", ""),
+                })
+
+        except Exception as exc:
+            logger.warning("Unable to list DRG attachments: %s", exc)
 
         for route_table in self._paginate(self.manager.virtual_network_client.list_drg_route_tables, compartment_id=compartment_id):
             rows.append({
