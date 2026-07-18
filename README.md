@@ -1,52 +1,70 @@
-# OCI Inventory
+# OCI Inventory Generator
 
-OCI Inventory is a read-only Python utility that inventories Oracle Cloud Infrastructure (OCI) resources for a target compartment and exports the result to an Excel workbook.
+A **read-only** command-line tool that inventories Oracle Cloud Infrastructure
+(OCI) resources for a target compartment and exports the result to a formatted
+Microsoft Excel workbook.
 
-The tool is designed to run in OCI Cloud Shell and other OCI-compatible environments with a valid OCI CLI configuration profile. It uses only read-only OCI SDK GET/LIST APIs and never performs Create, Update, Delete, or Action operations.
+The tool uses only OCI Python SDK `GET` and `LIST` APIs. It **never** performs
+Create, Update, Delete, or Action calls, and it is safe to execute against
+production tenancies with read-only permissions.
 
-## Features
+---
 
-- Interactive entrypoint with compartment, region, and output directory prompts
-- Read-only inventory collection across compute, database, networking, VPN, load balancer, storage, DNS, WAF, and IAM resources
-- Workbook export in the form `OCI_Inventory_<Compartment>.xlsx`
-- Progress reporting, logging, and resilient error handling per collector
-- Modular resource collectors that keep the existing architecture intact
+## Highlights
 
-## Prerequisites
+- Fully read-only — GET / LIST operations only
+- Interactive CLI with compartment, region, and output-directory prompts
+- Non-interactive execution via environment variables (CI / Cloud Shell)
+- Per-collector progress reporting and resilient error handling
+- Modular collectors for Compute, Database, Networking, VPN, Load Balancer,
+  Storage, DNS, WAF (WAAS + WAF v2), and IAM Policies
+- Excel workbook with a Summary sheet, resource-type sheets, frozen headers,
+  auto filters, auto-sized columns, and bold headers
+- Automatic detection of the OCI Cloud Shell config profile
 
-Before running the tool, ensure that:
+## Inventoried resources
 
-- Python 3.11+ is installed
-- Access to an OCI tenancy is available
-- Your OCI CLI profile exists in `~/.oci/config`
-- Your OCI profile has permission to read the target compartment and its resources
+The tool collects, without modification, the following resource families:
 
-## Cloud Shell setup
+- Compute Instances, VNIC Attachments, Boot Volume Attachments
+- VNICs, Private / Public IPs
+- VCNs, Subnets, DHCP Options
+- Internet / NAT / Service Gateways
+- DRGs, DRG Attachments, DRG Route Tables, DRG Route Distributions,
+  Remote Peering Connections, Local Peering Gateways
+- Route Tables + Route Rules
+- Security Lists + Ingress/Egress Rules
+- Network Security Groups + Security Rules
+- IPSec VPN Connections + Tunnels, CPEs
+- Load Balancers, Backend Sets, Backends, Certificates, Hostnames
+- Object Storage Buckets
+- Block Volumes, Boot Volumes, Volume Groups, Volume Backups,
+  Volume Group Backups
+- DB Systems, DB Homes, Databases, DB Nodes
+- Cloud VM Clusters, Cloud Exadata Infrastructures
+- Autonomous Databases
+- DNS Zones, Views, Resolvers
+- WAAS Policies + Protection / Access / Caching / Whitelists / Captchas /
+  Custom Protection Rules / Device Fingerprint / Human Interaction /
+  JS Challenges / Rate Limiting / Protection Settings
+- WAF v2 Web App Firewalls + Policies + Actions + Protection Rules +
+  Access Control Rules + Rate Limiting Rules + Network Address Lists +
+  Protection Capabilities
+- IAM Policies
 
-In OCI Cloud Shell:
+Every child resource is emitted as a dedicated inventory row (not embedded
+JSON) so the workbook remains machine-readable.
 
-```bash
-git clone <repo-url>
-cd oci-inventory
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python3 main.py
-```
+## Requirements
 
-The application will automatically use the default OCI CLI profile from Cloud Shell unless you override it with environment variables:
-
-- `OCI_CLI_PROFILE` or `OCI_PROFILE`
-- `OCI_REGION`
-- `OCI_CONFIG_FILE`
-- `OCI_COMPARTMENT_NAME`
-- `OCI_COMPARTMENT_OCID`
-- `OCI_OUTPUT_DIR`
+- Python 3.11+ (Python 3.9+ typically works, but 3.11 is recommended)
+- A valid OCI CLI configuration profile at `~/.oci/config`, or execution
+  inside OCI Cloud Shell (auto-detected via `/etc/oci/config`)
+- Read-only IAM permissions on the target compartment (see below)
 
 ## Installation
 
 ```bash
-cd oci-inventory
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -54,7 +72,7 @@ pip install -r requirements.txt
 
 ## Usage
 
-Interactive mode:
+### Interactive
 
 ```bash
 python3 main.py
@@ -67,548 +85,113 @@ You will be prompted for:
 - Region (optional; defaults to the OCI profile region if available)
 - Output directory (defaults to `./output`)
 
-Non-interactive mode:
+### Non-interactive
 
 ```bash
 export OCI_COMPARTMENT_NAME="my-compartment"
-export OCI_COMPARTMENT_OCID="ocid1.compartment.oc1..example"
+export OCI_COMPARTMENT_OCID="ocid1.compartment.oc1..<REDACTED>"
 export OCI_REGION="us-ashburn-1"
 export OCI_OUTPUT_DIR="./output"
 python3 main.py
 ```
 
-## Sample output
+Additional overrides:
 
-A typical run generates a workbook named like:
+- `OCI_CLI_PROFILE` / `OCI_PROFILE` — profile name in `~/.oci/config`
+- `OCI_CONFIG_FILE` — alternate path to the OCI config file
 
-```text
-output/OCI_Inventory_my-compartment.xlsx
+## Cloud Shell
+
+Cloud Shell is authenticated automatically. You can verify with:
+
+```bash
+oci os ns get
 ```
 
-The workbook contains:
+Then clone and run:
 
-- Summary sheet
-- Separate sheets per resource type
-- Frozen header row
-- Auto filters
-- Auto-sized columns
-- Bold headers
+```bash
+git clone <your-repo-url>
+cd oci-inventory
+pip3 install -r requirements.txt
+python3 main.py
+```
+
+## Output
+
+The workbook is written to `<output_dir>/OCI_Inventory_<Compartment>.xlsx`
+and contains:
+
+- A `Summary` sheet with compartment metadata and row counts per module
+- One sheet per resource type (e.g. `Networking - NSG`,
+  `WAF - WAF Web App Firewall`) with frozen header row, bold headers,
+  auto filter, and auto-sized columns
 - Empty sheets when a collector returns no data
-
-## Troubleshooting
-
-If the tool fails to start:
-
-1. Confirm that `~/.oci/config` exists in Cloud Shell.
-2. Confirm that the active profile name is reachable through `OCI_CLI_PROFILE` or `OCI_PROFILE`.
-3. Confirm that the compartment OCID and region are correct.
-4. Review `logs/oci_inventory.log` for collector-level errors.
-
-If collectors return empty results:
-
-- Verify the profile has access to the target compartment.
-- Confirm that the target region is correct.
-- Confirm that the resources exist in the compartment.
 
 ## Required IAM permissions (read-only)
 
-The tool must be run with a user, instance principal, or resource principal that has read-only access to the target compartment and the OCI services you want to inventory.
-
-Minimum read-only permissions commonly required:
-
-- `read` access to Compartments
-- `read` access to Compute instances and VNICs
-- `read` access to Networking resources such as VCNs, subnets, DRGs, NSGs, route tables, and public/private IPs
-- `read` access to Database services and DB systems
-- `read` access to Load Balancers, Buckets, Block Volumes, WAF, DNS, and IAM policy resources
-
-A policy similar to the following is typically sufficient for a scoped read-only inventory workflow:
+The executing principal must have read-only access to the target compartment.
+A policy similar to the following is typically sufficient:
 
 ```text
-Allow group <group-name> to inspect compartments in compartment <target-compartment>
-Allow group <group-name> to read instances in compartment <target-compartment>
-Allow group <group-name> to read vnics in compartment <target-compartment>
-Allow group <group-name> to read vcn-family in compartment <target-compartment>
-Allow group <group-name> to read db-family in compartment <target-compartment>
-Allow group <group-name> to read load-balancer-family in compartment <target-compartment>
-Allow group <group-name> to read object-family in compartment <target-compartment>
-Allow group <group-name> to read dns in compartment <target-compartment>
-Allow group <group-name> to read waas-family in compartment <target-compartment>
-Allow group <group-name> to read iam in compartment <target-compartment>
+Allow group <group-name> to inspect compartments in compartment <target>
+Allow group <group-name> to read instances in compartment <target>
+Allow group <group-name> to read vnic-attachments in compartment <target>
+Allow group <group-name> to read vnics in compartment <target>
+Allow group <group-name> to read vcn-family in compartment <target>
+Allow group <group-name> to read virtual-network-family in compartment <target>
+Allow group <group-name> to read volume-family in compartment <target>
+Allow group <group-name> to read db-family in compartment <target>
+Allow group <group-name> to read autonomous-database-family in compartment <target>
+Allow group <group-name> to read load-balancers in compartment <target>
+Allow group <group-name> to read object-family in compartment <target>
+Allow group <group-name> to read dns in compartment <target>
+Allow group <group-name> to read waas-family in compartment <target>
+Allow group <group-name> to read waf-family in compartment <target>
+Allow group <group-name> to read policies in compartment <target>
 ```
 
-## Safety statement
+## Privacy and safety
 
-This repository is intentionally implemented as a read-only inventory tool. It uses OCI SDK `GET` and `LIST` APIs only. No OCI Create, Update, Delete, or Action APIs are used anywhere in the repository.
+- 100% read-only — the tool uses only `GET` and `LIST` OCI SDK APIs.
+- No telemetry, no analytics, no outbound uploads, no third-party endpoints.
+- All output is written locally to the `output/` directory.
+- No credentials, OCIDs, IPs, or tenancy-specific data are stored outside
+  the local machine or committed to the repository.
 
+## Troubleshooting
 
-# OCI Inventory Generator
-
-A **read-only OCI Inventory Generator** built using the Oracle Cloud Infrastructure (OCI) Python SDK.
-
-This tool inventories an OCI compartment and exports the complete infrastructure inventory into a formatted Excel workbook.
-
-**No resources are created, modified, or deleted.**
-
----
-
-# Features
-
-Collects inventory for:
-
-- Compute Instances
-- VNICs
-- Private/Public IPs
-- Network Security Groups (NSGs)
-- VCNs
-- Subnets
-- Route Tables
-- Security Lists
-- Internet Gateways
-- NAT Gateways
-- Service Gateways
-- DRGs
-- DRG Attachments
-- Remote Peering Connections
-- Local Peering Gateways
-- DB Systems
-- Load Balancers
-- Buckets
-- Block Volumes
-- Boot Volumes
-- WAF Policies
-- DNS Zones
-- IPSec VPNs
-- CPEs
-- IAM Policies
-
-Exports everything into a single Excel workbook with separate worksheets.
-
----
-
-# Safety
-
-This project is **100% Read Only**.
-
-It only uses OCI SDK **GET** and **LIST** APIs.
-
-No changes are made to your OCI tenancy.
-
-No resource creation.
-
-No deletion.
-
-No updates.
-
-Safe to execute against Production environments (with read-only permissions).
-
----
-
-# Requirements
-
-- OCI Cloud Shell (Recommended)
-- Python 3.9+
-- OCI CLI (already available in Cloud Shell)
-- OCI SDK
-
----
-
-# Repository
-
-Clone the repository:
-
-```bash
-git clone https://github.com/sanjayjakhar33/oci-inventory.git
-```
-
-Enter the directory:
-
-```bash
-cd oci-inventory
-```
-
----
-
-# Install Dependencies
-
-Install Python dependencies.
-
-```bash
-pip3 install -r requirements.txt
-```
-
----
-
-# Verify OCI Authentication
-
-Cloud Shell is automatically authenticated.
-
-Verify by running:
+**Authentication error** — verify your Cloud Shell / local CLI profile:
 
 ```bash
 oci os ns get
 ```
 
-Expected output:
+**Permission error** — confirm the executing user has the read-only IAM
+permissions listed above on the target compartment.
 
-```json
-{
-  "data": "<namespace>"
-}
-```
+**No resources found** — verify the compartment OCID, region, and that the
+resources actually exist inside the compartment. Check `logs/oci_inventory.log`
+for collector-level warnings; individual failures never abort the run.
 
-If this works, authentication is successful.
-
----
-
-# Verify Region
-
-Check the active OCI region.
+**Python module error** — reinstall dependencies:
 
 ```bash
-echo $OCI_REGION
+pip install -r requirements.txt
 ```
 
-or
+## Contributing
 
-```bash
-oci iam region list
-```
+Contributions are welcome. Please read `CONTRIBUTING.md` for the workflow and
+`CODE_OF_CONDUCT.md` for community expectations. Security issues should be
+reported per `SECURITY.md`.
 
----
+## License
 
-# Run the Inventory Tool
+MIT License — see the `LICENSE` file.
 
-Execute:
+## Disclaimer
 
-```bash
-python3 main.py
-```
-
----
-
-# Provide Input
-
-The tool will prompt for:
-
-```
-Compartment Name:
-```
-
-Example
-
-```
-Ambajogai
-```
-
-Next
-
-```
-Compartment OCID:
-```
-
-Example
-
-```
-ocid1.compartment.oc1..xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
-
-Next
-
-```
-Region
-```
-
-Example
-
-```
-ap-hyderabad-1
-```
-
-Leave blank to use the current Cloud Shell region (if supported).
-
----
-
-# Inventory Collection
-
-The tool will collect information for:
-
-```
-Compute
-
-Database
-
-Networking
-
-Storage
-
-Load Balancer
-
-VPN
-
-DNS
-
-WAF
-
-Policies
-```
-
-Progress is displayed while collecting resources.
-
-Example:
-
-```
-Collecting Compute...
-
-Collecting Database...
-
-Collecting Networking...
-
-Collecting VPN...
-
-Collecting Storage...
-
-Collecting DNS...
-
-Collecting WAF...
-
-Generating Excel...
-
-Completed Successfully.
-```
-
----
-
-# Output
-
-The generated workbook will be created inside:
-
-```
-output/
-```
-
-Example
-
-```
-output/
-
-OCI_Inventory_Ambajogai.xlsx
-```
-
----
-
-# Download the Excel File
-
-List generated files.
-
-```bash
-ls -lh output
-```
-
-Use the OCI Cloud Shell File Browser to download:
-
-```
-output/OCI_Inventory_<Compartment>.xlsx
-```
-
----
-
-# Validate Python Files (Optional)
-
-Check for syntax errors.
-
-```bash
-python3 -m py_compile main.py
-```
-
-Validate all Python files.
-
-```bash
-find . -name "*.py" -exec python3 -m py_compile {} \;
-```
-
-No output means all files compiled successfully.
-
----
-
-# Typical Execution Flow
-
-```text
-Open OCI Cloud Shell
-        │
-        ▼
-Clone Repository
-        │
-        ▼
-Install Requirements
-        │
-        ▼
-Run main.py
-        │
-        ▼
-Enter Compartment Name
-        │
-        ▼
-Enter Compartment OCID
-        │
-        ▼
-Enter Region
-        │
-        ▼
-Collect OCI Inventory
-        │
-        ▼
-Generate Excel Workbook
-        │
-        ▼
-Download Excel File
-```
-
----
-
-# Example
-
-```bash
-git clone https://github.com/sanjayjakhar33/oci-inventory.git
-
-cd oci-inventory
-
-pip3 install -r requirements.txt
-
-python3 main.py
-```
-
-Example Input
-
-```
-Compartment Name
-
-Ambajogai
-
-Compartment OCID
-
-ocid1.compartment.oc1..aaaaaaaavjwd6hbdvyf7fprwpsegwab4s6jhrgqobdxzowj5klpvyfjg5mkq
-
-Region
-
-ap-hyderabad-1
-```
-
----
-
-# Excel Workbook
-
-The generated workbook contains worksheets similar to:
-
-```
-Summary
-
-Compute
-
-Database
-
-VCN
-
-Subnets
-
-NSGs
-
-Gateways
-
-DRGs
-
-Remote Peering
-
-Load Balancer
-
-Storage
-
-DNS
-
-WAF
-
-VPN
-
-Policies
-```
-
----
-
-# Troubleshooting
-
-## Authentication Error
-
-Verify Cloud Shell authentication.
-
-```bash
-oci os ns get
-```
-
----
-
-## Permission Error
-
-Ensure the executing user has read permissions for the target compartment.
-
----
-
-## No Resources Found
-
-Verify:
-
-- Correct Compartment OCID
-- Correct Region
-- Resources exist in the selected compartment
-
----
-
-## Python Module Error
-
-Reinstall dependencies.
-
-```bash
-pip3 install -r requirements.txt
-```
-
----
-
-## Output Not Generated
-
-Verify the output directory exists.
-
-```bash
-ls output
-```
-
----
-
-# IAM Permissions
-
-Recommended minimum permissions:
-
-- inspect compartments
-- inspect instances
-- inspect virtual-network-family
-- inspect volume-family
-- inspect database-family
-- inspect object-family
-- inspect load-balancers
-- inspect waas-family
-- inspect dns
-- inspect policies
-
-Read-only access is sufficient.
-
----
-
-# License
-
-MIT License
-
----
-
-# Disclaimer
-
-This project is intended for inventory and reporting purposes only.
-
-It performs **read-only** operations against OCI using the Oracle Cloud Infrastructure Python SDK and does **not** modify any OCI resources.
+This project is intended for inventory and reporting purposes only. It
+performs read-only operations against OCI using the Oracle Cloud
+Infrastructure Python SDK and does **not** modify any OCI resources.

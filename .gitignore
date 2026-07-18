@@ -1,7 +1,57 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project runtime output
+output/
+logs/
+*.log
+
+# Secrets / credentials
 .env
 .env.*
 *.env
 credentials.json
+.credentials
 *.pem
 *.key
-.credentials
+*.p12
+*.pfx
+oci_api_key*.pem
+
+# AI / build artifacts
+memory/
+.emergent/

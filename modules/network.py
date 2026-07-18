@@ -94,11 +94,12 @@ class NetworkCollector:
             })
 
         try:
-            response = self.manager.virtual_network_client.list_drg_attachments(
-                compartment_id=compartment_id
+            attachments = self._paginate(
+                self.manager.virtual_network_client.list_drg_attachments,
+                compartment_id=compartment_id,
             )
 
-            for attachment in response.data:
+            for attachment in attachments:
                 rows.append({
                     "Resource Type": "DRG Attachment",
                     "Name": getattr(attachment, "display_name", ""),
@@ -305,19 +306,28 @@ class NetworkCollector:
 
     def _collect_private_ips(self, compartment_id: str) -> list[dict[str, Any]]:
         rows = []
-        for private_ip in self._paginate(
-            self.manager.virtual_network_client.list_private_ips,
-            scope="REGION",
+        # list_private_ips filters by subnet_id / vnic_id / vlan_id — it does
+        # not accept scope or compartment_id. Enumerate per subnet in the
+        # target compartment to build a complete private-IP inventory.
+        for subnet in self._paginate(
+            self.manager.virtual_network_client.list_subnets,
             compartment_id=compartment_id,
         ):
-            rows.append({
-                "Resource Type": "Private IP",
-                "Name": getattr(private_ip, "display_name", ""),
-                "OCID": getattr(private_ip, "id", ""),
-                "IP Address": getattr(private_ip, "ip_address", ""),
-                "Subnet": getattr(private_ip, "subnet_id", ""),
-                "VCN": getattr(private_ip, "vcn_id", ""),
-            })
+            subnet_id = getattr(subnet, "id", "")
+            if not subnet_id:
+                continue
+            for private_ip in self._paginate(
+                self.manager.virtual_network_client.list_private_ips,
+                subnet_id=subnet_id,
+            ):
+                rows.append({
+                    "Resource Type": "Private IP",
+                    "Name": getattr(private_ip, "display_name", ""),
+                    "OCID": getattr(private_ip, "id", ""),
+                    "IP Address": getattr(private_ip, "ip_address", ""),
+                    "Subnet": getattr(private_ip, "subnet_id", "") or subnet_id,
+                    "VCN": getattr(private_ip, "vcn_id", "") or getattr(subnet, "vcn_id", ""),
+                })
         return rows
 
     def _collect_public_ips(self, compartment_id: str) -> list[dict[str, Any]]:

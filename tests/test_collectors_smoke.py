@@ -388,6 +388,38 @@ def test_waf_collector_emits_child_rows():
     print("[OK] WAF collector emits child rows and hostnames")
 
 
+def test_private_ips_use_subnet_id():
+    """list_private_ips must be called with subnet_id, not scope/compartment_id."""
+    mgr = _mgr_with_mocks()
+    subnet = SimpleNamespace(id="ocid1.subnet..s", vcn_id="ocid1.vcn..v", display_name="sub",
+                             cidr_block="10.0.0.0/24", lifecycle_state="AVAILABLE",
+                             prohibit_public_ip_on_vnic=False)
+    mgr.virtual_network_client.list_subnets = MagicMock(return_value=_empty_response([subnet]))
+    ip = SimpleNamespace(display_name="pip", id="ocid1.privateip..p",
+                         ip_address="10.0.0.5", subnet_id="ocid1.subnet..s",
+                         vcn_id="ocid1.vcn..v")
+    mgr.virtual_network_client.list_private_ips = MagicMock(return_value=_empty_response([ip]))
+    for name in [
+        "list_vcns", "list_internet_gateways", "list_nat_gateways",
+        "list_service_gateways", "list_drgs", "list_drg_attachments", "list_drg_route_tables",
+        "list_drg_route_distributions", "list_remote_peering_connections",
+        "list_local_peering_gateways", "list_route_tables", "list_security_lists",
+        "list_dhcp_options", "list_public_ips", "list_network_security_groups",
+    ]:
+        setattr(mgr.virtual_network_client, name, MagicMock(return_value=_empty_response([])))
+
+    collector = NetworkCollector(mgr, InventoryCache())
+    rows = collector.collect("ocid1.compartment..c")
+    # Confirm subnet_id was used, and scope/compartment_id were NOT passed
+    call = mgr.virtual_network_client.list_private_ips.call_args
+    assert "subnet_id" in call.kwargs, f"Expected subnet_id kwarg, got {call.kwargs}"
+    assert "scope" not in call.kwargs
+    assert "compartment_id" not in call.kwargs
+    pip_rows = [r for r in rows if r["Resource Type"] == "Private IP"]
+    assert len(pip_rows) == 1 and pip_rows[0]["IP Address"] == "10.0.0.5"
+    print("[OK] Private IPs enumerated per subnet_id")
+
+
 if __name__ == "__main__":
     test_network_nsg_rules_use_correct_sdk_call()
     test_network_route_table_uses_rt_id()
@@ -395,4 +427,5 @@ if __name__ == "__main__":
     test_boot_volume_attachments_pass_availability_domain()
     test_database_uses_compartment_scoped_apis()
     test_waf_collector_emits_child_rows()
+    test_private_ips_use_subnet_id()
     print("\nAll smoke tests passed")
