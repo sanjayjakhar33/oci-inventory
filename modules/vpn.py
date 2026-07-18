@@ -42,6 +42,16 @@ class VPNCollector:
                 tunnel_rows = []
                 tunnel_ips = []
                 static_routes = []
+                # Consolidated Customer LAN inventory (previously emitted as a
+                # separate "IPSec Customer LAN" sheet). All Customer LAN data
+                # is now flattened onto the IPSec Connection row.
+                routing_types: list[str] = []
+                traffic_selectors: list[str] = []
+                # Connection-level static_routes = customer LAN CIDRs for
+                # STATIC-routed connections.
+                connection_static_routes = list(getattr(connection, "static_routes", []) or [])
+                if connection_static_routes:
+                    routing_types.append("STATIC")
                 for tunnel in tunnels:
                     tunnel_rows.append(
                         f"{getattr(tunnel, 'display_name', '')} ({getattr(tunnel, 'lifecycle_state', '')})"
@@ -50,52 +60,35 @@ class VPNCollector:
                         tunnel_ips.append(getattr(tunnel, "vpn_ip", ""))
                     if getattr(tunnel, "route_tables", None):
                         static_routes.extend(getattr(tunnel, "route_tables", []) or [])
+                    routing = (getattr(tunnel, "routing", "") or "").upper()
+                    if routing and routing not in routing_types:
+                        routing_types.append(routing)
+                    if routing == "POLICY":
+                        enc = getattr(tunnel, "encryption_domain_config", None)
+                        cpe_selectors = getattr(enc, "cpe_traffic_selector", []) if enc else []
+                        tunnel_name = getattr(tunnel, "display_name", "") or ""
+                        for cidr in cpe_selectors or []:
+                            traffic_selectors.append(
+                                f"{tunnel_name}:{cidr}" if tunnel_name else cidr
+                            )
+                # Merge connection-level static routes into the Customer LAN
+                # CIDR list (previously incorrectly sourced from
+                # customer_bgp_asn, which is a BGP ASN string, not a CIDR).
+                customer_lan_cidrs = connection_static_routes
                 rows.append({
                     "Resource Type": "IPSec Connection",
                     "Name": getattr(connection, "display_name", ""),
                     "OCID": getattr(connection, "id", ""),
                     "CPE Name": getattr(connection, "cpe_id", ""),
                     "CPE Public IP": getattr(self.cache.get_cpe(getattr(connection, "cpe_id", "")), "ip_address", "") if self.cache.get_cpe(getattr(connection, "cpe_id", "")) else "",
-                    "Customer LAN CIDRs": ", ".join(getattr(connection, "customer_bgp_asn", []) or []),
+                    "Customer LAN CIDRs": ", ".join(customer_lan_cidrs),
+                    "Routing Type": ", ".join(routing_types),
+                    "Traffic Selectors": ", ".join(traffic_selectors),
                     "DRG": getattr(connection, "drg_id", ""),
                     "Tunnel Public IPs": ", ".join(tunnel_ips),
                     "Tunnel Status": "; ".join(tunnel_rows),
                     "Static Routes": ", ".join(static_routes),
                 })
-
-                # Additive: one row per Customer LAN CIDR. Covers static
-                # routes declared on the IPSec connection (STATIC routing)
-                # and per-tunnel policy-based traffic selectors.
-                ipsec_name = getattr(connection, "display_name", "") or ""
-                ipsec_id = getattr(connection, "id", "") or ""
-                for cidr in getattr(connection, "static_routes", []) or []:
-                    rows.append({
-                        "Resource Type": "IPSec Customer LAN",
-                        "Name": cidr,
-                        "OCID": ipsec_id,
-                        "IPSec Name": ipsec_name,
-                        "IPSec OCID": ipsec_id,
-                        "Customer LAN CIDR": cidr,
-                        "Routing Type": "STATIC",
-                        "Tunnel": "",
-                    })
-                for tunnel in tunnels:
-                    routing = getattr(tunnel, "routing", "") or ""
-                    tunnel_name = getattr(tunnel, "display_name", "") or ""
-                    if routing.upper() == "POLICY":
-                        enc = getattr(tunnel, "encryption_domain_config", None)
-                        cpe_selectors = getattr(enc, "cpe_traffic_selector", []) if enc else []
-                        for cidr in cpe_selectors or []:
-                            rows.append({
-                                "Resource Type": "IPSec Customer LAN",
-                                "Name": cidr,
-                                "OCID": ipsec_id,
-                                "IPSec Name": ipsec_name,
-                                "IPSec OCID": ipsec_id,
-                                "Customer LAN CIDR": cidr,
-                                "Routing Type": "POLICY",
-                                "Tunnel": tunnel_name,
-                            })
             except Exception as exc:
                 logger.warning("Unable to inventory IPSec connection %s: %s", getattr(connection, "id", ""), exc)
         return rows

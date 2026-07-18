@@ -588,7 +588,12 @@ def test_waf_access_rules_unified_row():
 
 
 def test_ipsec_customer_lan_pools():
-    """IPSec Customer LAN CIDRs are enumerated as dedicated rows (STATIC + POLICY)."""
+    """Customer LAN info is consolidated onto the IPSec Connection row.
+
+    The previous separate `IPSec Customer LAN` row type has been removed;
+    Customer LAN CIDRs, Routing Type, and Traffic Selectors are now columns
+    on the single IPSec Connection row.
+    """
     mgr = _mgr_with_mocks()
     mgr.virtual_network_client.list_cpes = MagicMock(return_value=_empty_response([]))
     connection = SimpleNamespace(
@@ -615,24 +620,36 @@ def test_ipsec_customer_lan_pools():
     )
 
     rows = VPNCollector(mgr, InventoryCache()).collect("ocid1.compartment..c")
+
+    # Removed sheet: no IPSec Customer LAN rows anymore.
     lan_rows = [r for r in rows if r["Resource Type"] == "IPSec Customer LAN"]
-    # 2 static-route rows + 1 policy CPE selector row = 3
-    assert len(lan_rows) == 3, f"Expected 3 Customer LAN rows, got {len(lan_rows)}: {lan_rows}"
-    static_cidrs = {r["Customer LAN CIDR"] for r in lan_rows if r["Routing Type"] == "STATIC"}
-    assert static_cidrs == {"10.10.0.0/16", "192.168.1.0/24"}
-    policy_rows = [r for r in lan_rows if r["Routing Type"] == "POLICY"]
-    assert len(policy_rows) == 1
-    assert policy_rows[0]["Customer LAN CIDR"] == "10.20.0.0/16"
-    assert policy_rows[0]["Tunnel"] == "t1"
-    # Required columns present
-    required = {"Resource Type", "IPSec Name", "IPSec OCID",
-                "Customer LAN CIDR", "Routing Type", "Tunnel"}
-    for r in lan_rows:
-        assert required.issubset(set(r.keys())), f"missing cols in {r}"
-    # Existing IPSec Connection row is still emitted (no regression)
+    assert lan_rows == [], f"Unexpected IPSec Customer LAN rows remaining: {lan_rows}"
+
+    # Consolidated: exactly one IPSec Connection row with LAN columns
     conn_rows = [r for r in rows if r["Resource Type"] == "IPSec Connection"]
     assert len(conn_rows) == 1
-    print("[OK] IPSec Customer LAN CIDR rows emitted (STATIC + POLICY)")
+    conn = conn_rows[0]
+
+    # Customer LAN CIDRs: from static_routes
+    cidrs = conn["Customer LAN CIDRs"]
+    assert "10.10.0.0/16" in cidrs and "192.168.1.0/24" in cidrs
+
+    # Routing Type: STATIC (from connection static_routes) + POLICY + BGP (from tunnels)
+    routing = conn["Routing Type"]
+    for expected in ("STATIC", "POLICY", "BGP"):
+        assert expected in routing, f"Missing {expected} in routing types: {routing}"
+
+    # Traffic Selectors: only from POLICY tunnel's CPE traffic selectors
+    ts = conn["Traffic Selectors"]
+    assert "10.20.0.0/16" in ts
+    assert "t1" in ts  # prefixed with tunnel name
+
+    # Existing columns preserved
+    for k in ("Name", "OCID", "CPE Name", "DRG", "Tunnel Public IPs",
+              "Tunnel Status", "Static Routes"):
+        assert k in conn, f"missing legacy column {k}"
+
+    print("[OK] IPSec Customer LAN consolidated onto IPSec Connection row")
 
 
 if __name__ == "__main__":
