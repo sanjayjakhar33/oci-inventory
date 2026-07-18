@@ -53,9 +53,34 @@ class DatabaseCollector:
                     exc,
                 )
 
-        # Databases are compartment-scoped
-        databases_all = self._list_databases(compartment_id)
+        # Databases MUST be listed per DB Home (or per DB System). The OCI
+        # REST API rejects compartment-only calls with
+        # "MissingParameter: dbHomeId or systemId required" even though the
+        # Python SDK signature accepts a bare compartment_id.
         db_home_index: dict[str, Any] = {getattr(h, "id", ""): h for h in db_homes_all}
+        databases_all: list[Any] = []
+        seen_db_ids: set[str] = set()
+        for db_home in db_homes_all:
+            db_home_id = getattr(db_home, "id", "")
+            if not db_home_id:
+                continue
+            for database in self._list_databases(compartment_id, db_home_id=db_home_id):
+                dbid = getattr(database, "id", "")
+                if dbid and dbid in seen_db_ids:
+                    continue
+                if dbid:
+                    seen_db_ids.add(dbid)
+                databases_all.append(database)
+        # Fallback: also enumerate per DB System (system_id variant) so that
+        # any databases not resolvable via db_home_id are still captured.
+        for db_system_id in db_system_ids:
+            for database in self._list_databases(compartment_id, system_id=db_system_id):
+                dbid = getattr(database, "id", "")
+                if dbid and dbid in seen_db_ids:
+                    continue
+                if dbid:
+                    seen_db_ids.add(dbid)
+                databases_all.append(database)
         for database in databases_all:
             try:
                 rows.append(
@@ -155,15 +180,30 @@ class DatabaseCollector:
             logger.warning("Unable to list DB homes in compartment %s: %s", compartment_id, exc)
             return []
 
-    def _list_databases(self, compartment_id: str) -> list[Any]:
+    def _list_databases(
+        self,
+        compartment_id: str,
+        db_home_id: str | None = None,
+        system_id: str | None = None,
+    ) -> list[Any]:
         try:
+            kwargs: dict[str, Any] = {"compartment_id": compartment_id}
+            if db_home_id:
+                kwargs["db_home_id"] = db_home_id
+            if system_id:
+                kwargs["system_id"] = system_id
             response = list_call_get_all_results(
                 self.manager.database_client.list_databases,
-                compartment_id=compartment_id,
+                **kwargs,
             )
             return response.data if hasattr(response, "data") else []
         except Exception as exc:
-            logger.warning("Unable to list databases in compartment %s: %s", compartment_id, exc)
+            logger.warning(
+                "Unable to list databases (db_home=%s, system=%s): %s",
+                db_home_id,
+                system_id,
+                exc,
+            )
             return []
 
     def _list_db_nodes(

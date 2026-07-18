@@ -186,15 +186,7 @@ class DNSCollector:
                     get_kwargs["scope"] = cfg["scope"]
                 if view_id:
                     get_kwargs["view_id"] = view_id
-                try:
-                    records = self._paginate(
-                        self.manager.dns_client.get_zone_records, **get_kwargs
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Unable to enumerate DNS records for zone %s: %s", zone_id, exc
-                    )
-                    records = []
+                records = self._get_all_zone_records(**get_kwargs)
                 for record in records:
                     rows.append({
                         "Resource Type": cfg["resource_type"],
@@ -208,6 +200,36 @@ class DNSCollector:
                         "Is Protected": getattr(record, "is_protected", ""),
                     })
         return rows
+
+    def _get_all_zone_records(self, **get_kwargs: Any) -> list[Any]:
+        """Return the flat list of Record objects for a zone.
+
+        `get_zone_records` returns a `RecordCollection` (has `.items`), not a
+        list. `list_call_get_all_results` handles pagination for it and
+        yields a `RecordCollection` with the aggregated items, so we unwrap
+        `.items` before returning. This is why prior iteration produced no
+        rows for either public or private zones.
+        """
+        try:
+            response = list_call_get_all_results(
+                self.manager.dns_client.get_zone_records, **get_kwargs
+            )
+            data = getattr(response, "data", None)
+            if data is None:
+                return []
+            items = getattr(data, "items", None)
+            if items is not None:
+                return list(items)
+            if isinstance(data, list):
+                return data
+            return []
+        except Exception as exc:
+            logger.warning(
+                "Unable to enumerate DNS records for zone %s: %s",
+                get_kwargs.get("zone_name_or_id", ""),
+                exc,
+            )
+            return []
 
     def _paginate(self, list_method: Any, **kwargs: Any) -> list[Any]:
         try:

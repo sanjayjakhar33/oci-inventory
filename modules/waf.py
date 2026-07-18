@@ -62,7 +62,7 @@ class WAFCollector:
                 "Name": policy_name,
                 "OCID": policy_id,
                 "Frontend Hostname": domain_name,
-                "Additional Domains": ", ".join(additional_domains),
+                "Additional Domains": "",
                 "CNAME": getattr(policy, "cname", "") or "",
                 "Compartment": getattr(policy, "compartment_id", "") or "",
                 "Lifecycle": getattr(policy, "lifecycle_state", ""),
@@ -72,11 +72,32 @@ class WAFCollector:
                 origins = ", ".join((getattr(details, "origins", {}) or {}).keys())
                 base_row["Origins"] = origins
                 base_row["CNAME"] = getattr(details, "cname", "") or base_row["CNAME"]
-                base_row["Additional Domains"] = ", ".join(
-                    getattr(details, "additional_domains", []) or additional_domains
-                )
+                # WaasPolicySummary has `domain` but no `additional_domains`;
+                # the full policy has both. Merge primary + additional and
+                # de-duplicate while preserving order (fixes the previously
+                # empty "Additional Domains" column).
+                details_domain = getattr(details, "domain", "") or domain_name
+                details_additional = list(getattr(details, "additional_domains", []) or additional_domains)
+                if details_domain:
+                    base_row["Frontend Hostname"] = details_domain
+                combined: list[str] = []
+                seen: set[str] = set()
+                for d in [details_domain, *details_additional]:
+                    if d and d not in seen:
+                        seen.add(d)
+                        combined.append(d)
+                base_row["Additional Domains"] = ", ".join(combined)
             except Exception as exc:
                 logger.warning("Unable to enrich WAAS policy %s: %s", policy_id, exc)
+                # Fallback (details fetch failed): populate from the summary
+                # data we already have, still including primary + additional.
+                combined = []
+                seen = set()
+                for d in [domain_name, *additional_domains]:
+                    if d and d not in seen:
+                        seen.add(d)
+                        combined.append(d)
+                base_row["Additional Domains"] = ", ".join(combined)
             rows.append(base_row)
 
             rows.extend(self._collect_waas_child_rules(policy_id, policy_name))
@@ -319,18 +340,25 @@ class WAFCollector:
                         names = [getattr(h, "hostname", "") for h in hostnames if getattr(h, "hostname", "")]
                         if names:
                             frontend = names[0]
-                            additional_domains = names[1:]
+                            additional_domains = names[:]  # include primary + all protected hostnames
                     except Exception as exc:
                         logger.warning("Unable to resolve LB hostnames for WAF %s: %s", fw_id, exc)
             except Exception as exc:
                 logger.warning("Unable to enrich WAF %s: %s", fw_id, exc)
 
+            # De-duplicate while preserving order (primary domain first).
+            _seen: set[str] = set()
+            _domains: list[str] = []
+            for d in additional_domains:
+                if d and d not in _seen:
+                    _seen.add(d)
+                    _domains.append(d)
             rows.append({
                 "Resource Type": "WAF Web App Firewall",
                 "Name": fw_name,
                 "OCID": fw_id,
                 "Frontend Hostname": frontend,
-                "Additional Domains": ", ".join(additional_domains),
+                "Additional Domains": ", ".join(_domains),
                 "Backend Type": getattr(firewall, "backend_type", "") or "",
                 "Compartment": getattr(firewall, "compartment_id", "") or "",
                 "Policy OCID": policy_id,

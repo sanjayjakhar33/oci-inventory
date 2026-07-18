@@ -242,8 +242,15 @@ def test_database_uses_compartment_scoped_apis():
     # Check compartment_id was passed to key list APIs
     _, kwargs_homes = mgr.database_client.list_db_homes.call_args
     assert kwargs_homes.get("compartment_id") == "ocid1.compartment..c"
-    _, kwargs_dbs = mgr.database_client.list_databases.call_args
-    assert kwargs_dbs.get("compartment_id") == "ocid1.compartment..c"
+    # list_databases MUST be called scoped to a DB home (or system) — bare
+    # compartment_id causes an OCI "MissingParameter" runtime warning.
+    all_db_calls = mgr.database_client.list_databases.call_args_list
+    assert all_db_calls, "list_databases was never called"
+    for call in all_db_calls:
+        kw = call.kwargs
+        assert "db_home_id" in kw or "system_id" in kw, (
+            f"list_databases called without db_home_id/system_id: {kw}"
+        )
     # list_db_nodes should be called with compartment_id + db_system_id
     call_args = mgr.database_client.list_db_nodes.call_args
     assert call_args.kwargs.get("compartment_id") == "ocid1.compartment..c"
@@ -382,10 +389,16 @@ def test_waf_collector_emits_child_rows():
     assert not missing, f"Missing WAF row types: {missing}\nFound: {sorted(types_found)}"
     waas_row = [r for r in rows if r["Resource Type"] == "WAAS Policy"][0]
     assert waas_row["Frontend Hostname"] == "app.example.com"
-    assert "www.example.com" in waas_row["Additional Domains"]
+    # Additional Domains column now includes primary + additional hostnames
+    ad = waas_row["Additional Domains"]
+    assert "app.example.com" in ad
+    assert "www.example.com" in ad
     waf_fw = [r for r in rows if r["Resource Type"] == "WAF Web App Firewall"][0]
     assert waf_fw["Frontend Hostname"] == "app.example.com"
     assert waf_fw["Policy OCID"] == "ocid1.wafp..p"
+    # WAF v2 Additional Domains: primary + all protected hostnames
+    ad2 = waf_fw["Additional Domains"]
+    assert "app.example.com" in ad2 and "www.example.com" in ad2
     print("[OK] WAF collector emits child rows and hostnames")
 
 
@@ -471,9 +484,12 @@ def test_dns_private_zones_and_records():
         return _empty_response([])
 
     def _get_zone_records(**kwargs):
+        # Real SDK returns a Response whose .data is a RecordCollection
+        # (has .items). Simulate that so the new _get_all_zone_records
+        # implementation exercises the .items unwrap path.
         if kwargs.get("scope") == "PRIVATE":
-            return _empty_response([record_priv])
-        return _empty_response([record_a])
+            return SimpleNamespace(data=SimpleNamespace(items=[record_priv]))
+        return SimpleNamespace(data=SimpleNamespace(items=[record_a]))
 
     mgr.dns_client.list_zones = MagicMock(side_effect=_list_zones)
     mgr.dns_client.list_views = MagicMock(side_effect=_list_views)
@@ -652,6 +668,61 @@ def test_ipsec_customer_lan_pools():
     print("[OK] IPSec Customer LAN consolidated onto IPSec Connection row")
 
 
+def test_drg_family_consolidated_to_single_resource_type():
+    """All DRG-family rows share `Resource Type = 'DRG'` so the workbook
+    produces a single `Networking - DRG` sheet, with `Sub Type` preserving
+    the original entity kind and a unified column schema.
+    """
+    mgr = _mgr_with_mocks()
+    drg = SimpleNamespace(id="ocid1.drg..1", display_name="drg-a", lifecycle_state="AVAILABLE")
+    attachment = SimpleNamespace(
+        id="ocid1.drgatt..a", display_name="att-a", drg_id="ocid1.drg..1",
+        vcn_id="ocid1.vcn..v", lifecycle_state="ATTACHED",
+    )
+    rt = SimpleNamespace(id="ocid1.drgrt..r", display_name="drg-rt", drg_id="ocid1.drg..1", lifecycle_state="AVAILABLE")
+    dist = SimpleNamespace(id="ocid1.drgdist..d", display_name="drg-dist", drg_id="ocid1.drg..1", lifecycle_state="AVAILABLE")
+    stmt = SimpleNamespace(id="ocid1.drgstmt..s", display_name="stmt-1", action="ACCEPT", priority=100)
+
+    mgr.virtual_network_client.list_drgs = MagicMock(return_value=_empty_response([drg]))
+    mgr.virtual_network_client.list_drg_attachments = MagicMock(return_value=_empty_response([attachment]))
+    mgr.virtual_network_client.list_drg_route_tables = MagicMock(return_value=_empty_response([rt]))
+    mgr.virtual_network_client.list_drg_route_distributions = MagicMock(return_value=_empty_response([dist]))
+    mgr.virtual_network_client.list_drg_route_distribution_statements = MagicMock(return_value=_empty_response([stmt]))
+    # No RPC / LPG in this test — they stay in their own sheets.
+    mgr.virtual_network_client.list_remote_peering_connections = MagicMock(return_value=_empty_response([]))
+    mgr.virtual_network_client.list_local_peering_gateways = MagicMock(return_value=_empty_response([]))
+    # Stub all other network list_* calls
+    for name in [
+        "list_vcns", "list_subnets", "list_internet_gateways", "list_nat_gateways",
+        "list_service_gateways", "list_route_tables", "list_security_lists",
+        "list_dhcp_options", "list_private_ips", "list_public_ips",
+        "list_network_security_groups", "list_cpes", "list_ip_sec_connections",
+    ]:
+        setattr(mgr.virtual_network_client, name, MagicMock(return_value=_empty_response([])))
+
+    rows = NetworkCollector(mgr, InventoryCache()).collect("ocid1.compartment..c")
+    drg_rows = [r for r in rows if r.get("Resource Type") == "DRG"]
+    # Expect: 1 DRG + 1 attachment + 1 route table + 1 distribution + 1 statement = 5
+    assert len(drg_rows) == 5, f"Expected 5 unified DRG rows, got {len(drg_rows)}: {[r.get('Sub Type') for r in drg_rows]}"
+    subs = [r["Sub Type"] for r in drg_rows]
+    assert subs == ["DRG", "DRG Attachment", "DRG Route Table", "DRG Route Distribution", "DRG Route Distribution Statement"]
+    # Union schema: every row has the same keys as the first row
+    first_keys = set(drg_rows[0].keys())
+    for r in drg_rows[1:]:
+        assert set(r.keys()) == first_keys, f"Row schema mismatch: {set(r.keys()) ^ first_keys}"
+    # Statement row carries Action + Priority + DRG Route Distribution
+    stmt_row = [r for r in drg_rows if r["Sub Type"] == "DRG Route Distribution Statement"][0]
+    assert stmt_row["Action"] == "ACCEPT"
+    assert stmt_row["Priority"] == 100
+    assert stmt_row["DRG Route Distribution"] == "ocid1.drgdist..d"
+    # No orphaned old resource-type rows
+    old_types = {"DRG Attachment", "DRG Route Table", "DRG Route Distribution",
+                 "DRG Route Distribution Statement"}
+    leaked = [r for r in rows if r["Resource Type"] in old_types]
+    assert not leaked, f"Old DRG resource types leaked: {leaked}"
+    print("[OK] DRG family consolidated into single 'DRG' resource type with Sub Type")
+
+
 if __name__ == "__main__":
     test_network_nsg_rules_use_correct_sdk_call()
     test_network_route_table_uses_rt_id()
@@ -663,4 +734,5 @@ if __name__ == "__main__":
     test_dns_private_zones_and_records()
     test_waf_access_rules_unified_row()
     test_ipsec_customer_lan_pools()
+    test_drg_family_consolidated_to_single_resource_type()
     print("\nAll smoke tests passed")

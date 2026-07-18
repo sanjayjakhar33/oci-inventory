@@ -84,18 +84,39 @@ class NetworkCollector:
         return rows
 
     def _collect_drg_resources(self, compartment_id: str) -> list[dict[str, Any]]:
-        rows = []
+        # All DRG-family rows (DRG, DRG Attachment, DRG Route Table,
+        # DRG Route Distribution, DRG Route Distribution Statement) are
+        # emitted with a shared `Resource Type = "DRG"` so the workbook
+        # groups them into a single `Networking - DRG` sheet. The `Sub Type`
+        # column preserves the original resource kind. Every row uses the
+        # same key set (union schema) so the Excel builder picks up all
+        # columns from the first row's headers.
+        drg_columns = (
+            "Resource Type", "Sub Type", "Name", "OCID", "DRG", "VCN",
+            "DRG Route Distribution", "Action", "Priority", "Lifecycle",
+        )
+
+        def _drg_row(**overrides: Any) -> dict[str, Any]:
+            base = {col: "" for col in drg_columns}
+            base["Resource Type"] = "DRG"
+            base.update(overrides)
+            return base
+
+        rows: list[dict[str, Any]] = []
         drg_ids: list[str] = []
         for drg in self._paginate(self.manager.virtual_network_client.list_drgs, compartment_id=compartment_id):
             drg_id = getattr(drg, "id", "")
             if drg_id:
                 drg_ids.append(drg_id)
-            rows.append({
-                "Resource Type": "DRG",
-                "Name": getattr(drg, "display_name", ""),
-                "OCID": drg_id,
-                "Lifecycle": getattr(drg, "lifecycle_state", ""),
-            })
+            rows.append(_drg_row(
+                **{
+                    "Sub Type": "DRG",
+                    "Name": getattr(drg, "display_name", ""),
+                    "OCID": drg_id,
+                    "DRG": drg_id,
+                    "Lifecycle": getattr(drg, "lifecycle_state", ""),
+                }
+            ))
 
         try:
             attachments = self._paginate(
@@ -104,14 +125,16 @@ class NetworkCollector:
             )
 
             for attachment in attachments:
-                rows.append({
-                    "Resource Type": "DRG Attachment",
-                    "Name": getattr(attachment, "display_name", ""),
-                    "OCID": getattr(attachment, "id", ""),
-                    "DRG": getattr(attachment, "drg_id", ""),
-                    "VCN": getattr(attachment, "vcn_id", ""),
-                    "Lifecycle": getattr(attachment, "lifecycle_state", ""),
-                })
+                rows.append(_drg_row(
+                    **{
+                        "Sub Type": "DRG Attachment",
+                        "Name": getattr(attachment, "display_name", ""),
+                        "OCID": getattr(attachment, "id", ""),
+                        "DRG": getattr(attachment, "drg_id", ""),
+                        "VCN": getattr(attachment, "vcn_id", ""),
+                        "Lifecycle": getattr(attachment, "lifecycle_state", ""),
+                    }
+                ))
 
         except Exception as exc:
             logger.warning("Unable to list DRG attachments: %s", exc)
@@ -119,40 +142,47 @@ class NetworkCollector:
         # list_drg_route_tables requires drg_id (not compartment_id); iterate per DRG.
         for drg_id in drg_ids:
             for route_table in self._paginate(self.manager.virtual_network_client.list_drg_route_tables, drg_id=drg_id):
-                rows.append({
-                    "Resource Type": "DRG Route Table",
-                    "Name": getattr(route_table, "display_name", ""),
-                    "OCID": getattr(route_table, "id", ""),
-                    "DRG": getattr(route_table, "drg_id", "") or drg_id,
-                    "Lifecycle": getattr(route_table, "lifecycle_state", ""),
-                })
+                rows.append(_drg_row(
+                    **{
+                        "Sub Type": "DRG Route Table",
+                        "Name": getattr(route_table, "display_name", ""),
+                        "OCID": getattr(route_table, "id", ""),
+                        "DRG": getattr(route_table, "drg_id", "") or drg_id,
+                        "Lifecycle": getattr(route_table, "lifecycle_state", ""),
+                    }
+                ))
 
         # list_drg_route_distributions requires drg_id (not compartment_id); iterate per DRG.
         for drg_id in drg_ids:
             for distribution in self._paginate(self.manager.virtual_network_client.list_drg_route_distributions, drg_id=drg_id):
-                rows.append({
-                    "Resource Type": "DRG Route Distribution",
-                    "Name": getattr(distribution, "display_name", ""),
-                    "OCID": getattr(distribution, "id", ""),
-                    "DRG": getattr(distribution, "drg_id", "") or drg_id,
-                    "Lifecycle": getattr(distribution, "lifecycle_state", ""),
-                })
+                dist_id = getattr(distribution, "id", "")
+                rows.append(_drg_row(
+                    **{
+                        "Sub Type": "DRG Route Distribution",
+                        "Name": getattr(distribution, "display_name", ""),
+                        "OCID": dist_id,
+                        "DRG": getattr(distribution, "drg_id", "") or drg_id,
+                        "Lifecycle": getattr(distribution, "lifecycle_state", ""),
+                    }
+                ))
                 try:
                     statements = self._paginate(
                         self.manager.virtual_network_client.list_drg_route_distribution_statements,
-                        drg_route_distribution_id=getattr(distribution, "id", ""),
+                        drg_route_distribution_id=dist_id,
                     )
                     for statement in statements:
-                        rows.append({
-                            "Resource Type": "DRG Route Distribution Statement",
-                            "Name": getattr(statement, "display_name", ""),
-                            "OCID": getattr(statement, "id", ""),
-                            "DRG Route Distribution": getattr(distribution, "id", ""),
-                            "Action": getattr(statement, "action", ""),
-                            "Priority": getattr(statement, "priority", ""),
-                        })
+                        rows.append(_drg_row(
+                            **{
+                                "Sub Type": "DRG Route Distribution Statement",
+                                "Name": getattr(statement, "display_name", ""),
+                                "OCID": getattr(statement, "id", ""),
+                                "DRG Route Distribution": dist_id,
+                                "Action": getattr(statement, "action", ""),
+                                "Priority": getattr(statement, "priority", ""),
+                            }
+                        ))
                 except Exception as exc:
-                    logger.warning("Unable to enumerate DRG route distribution statements for %s: %s", getattr(distribution, "id", ""), exc)
+                    logger.warning("Unable to enumerate DRG route distribution statements for %s: %s", dist_id, exc)
 
         for rpc in self._paginate(self.manager.virtual_network_client.list_remote_peering_connections, compartment_id=compartment_id):
             rows.append({
