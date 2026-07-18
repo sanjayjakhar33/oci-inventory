@@ -182,7 +182,7 @@ class NetworkCollector:
         for route_table in self._paginate(self.manager.virtual_network_client.list_route_tables, compartment_id=compartment_id):
             route_table_id = getattr(route_table, "id", "")
             try:
-                details = self.manager.virtual_network_client.get_route_table(route_table_id=route_table_id).data
+                details = self.manager.virtual_network_client.get_route_table(rt_id=route_table_id).data
                 for rule in getattr(details, "route_rules", []) or []:
                     rows.append({
                         "Resource Type": "Route Rule",
@@ -259,18 +259,32 @@ class NetworkCollector:
         rows = []
         for nsg in self._paginate(self.manager.virtual_network_client.list_network_security_groups, compartment_id=compartment_id):
             nsg_id = getattr(nsg, "id", "")
+            nsg_name = getattr(nsg, "display_name", "")
             try:
-                details = self.manager.virtual_network_client.get_network_security_group(network_security_group_id=nsg_id).data
-                for rule in getattr(details, "security_rules", []) or []:
+                rules = self._paginate(
+                    self.manager.virtual_network_client.list_network_security_group_security_rules,
+                    network_security_group_id=nsg_id,
+                )
+                for rule in rules:
                     rows.append({
                         "Resource Type": "NSG Rule",
-                        "Name": getattr(nsg, "display_name", ""),
+                        "Name": nsg_name,
+                        "NSG Name": nsg_name,
+                        "NSG OCID": nsg_id,
                         "OCID": nsg_id,
+                        "Rule ID": getattr(rule, "id", ""),
                         "Direction": getattr(rule, "direction", ""),
                         "Protocol": getattr(rule, "protocol", ""),
-                        "Source": getattr(rule, "source", ""),
-                        "Destination": getattr(rule, "destination", ""),
-                        "Description": getattr(rule, "description", ""),
+                        "Source": getattr(rule, "source", "") or "",
+                        "Destination": getattr(rule, "destination", "") or "",
+                        "Source Type": getattr(rule, "source_type", "") or "",
+                        "Destination Type": getattr(rule, "destination_type", "") or "",
+                        "TCP Options": str(getattr(rule, "tcp_options", "") or ""),
+                        "UDP Options": str(getattr(rule, "udp_options", "") or ""),
+                        "ICMP Options": str(getattr(rule, "icmp_options", "") or ""),
+                        "Is Stateless": getattr(rule, "is_stateless", ""),
+                        "Is Valid": getattr(rule, "is_valid", ""),
+                        "Description": getattr(rule, "description", "") or "",
                     })
             except Exception as exc:
                 logger.warning("Unable to inspect NSG rules for %s: %s", nsg_id, exc)

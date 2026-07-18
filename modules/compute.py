@@ -106,10 +106,14 @@ class ComputeCollector:
             self.logger.warning("Unable to get NSG %s: %s", nsg_id, exc)
             return None
 
-    def _list_boot_volume_attachments(self, compartment_id: str, instance_id: str) -> list[Any]:
+    def _list_boot_volume_attachments(self, compartment_id: str, instance_id: str, availability_domain: str) -> list[Any]:
+        if not availability_domain:
+            self.logger.warning("Skipping boot volume attachment lookup for %s: missing availability_domain", instance_id)
+            return []
         try:
             response = list_call_get_all_results(
                 self.manager.compute_client.list_boot_volume_attachments,
+                availability_domain=availability_domain,
                 compartment_id=compartment_id,
                 instance_id=instance_id,
             )
@@ -176,7 +180,7 @@ class ComputeCollector:
                 row["NSG Names"] = ", ".join(nsg_names)
                 row["NSG OCIDs"] = ", ".join(nsg_ids)
 
-        boot_attachments = self._list_boot_volume_attachments(compartment_id, getattr(instance, "id", ""))
+        boot_attachments = self._list_boot_volume_attachments(compartment_id, getattr(instance, "id", ""), getattr(instance, "availability_domain", ""))
         boot_attachment = boot_attachments[0] if boot_attachments else None
         boot_volume = self._get_boot_volume(getattr(boot_attachment, "boot_volume_id", "")) if boot_attachment else None
         if boot_volume is not None:

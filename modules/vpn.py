@@ -37,7 +37,7 @@ class VPNCollector:
             try:
                 tunnels = self._paginate(
                     self.manager.virtual_network_client.list_ip_sec_connection_tunnels,
-                    ip_sec_connection_id=getattr(connection, "id", ""),
+                    ipsc_id=getattr(connection, "id", ""),
                 )
                 tunnel_rows = []
                 tunnel_ips = []

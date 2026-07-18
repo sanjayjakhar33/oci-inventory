@@ -34,6 +34,7 @@ class OCIClientManager:
         self.dns_client = oci.dns.DnsClient(self._config, region=self.region)
         self.identity_client = oci.identity.IdentityClient(self._config, region=self.region)
         self.waas_client = oci.waas.WaasClient(self._config, region=self.region)
+        self.waf_client = oci.waf.WafClient(self._config, region=self.region)
 
     def _load_config(self) -> dict[str, Any]:
         """Load OCI config from the CLI profile."""
