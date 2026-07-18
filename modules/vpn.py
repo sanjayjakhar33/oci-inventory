@@ -62,6 +62,40 @@ class VPNCollector:
                     "Tunnel Status": "; ".join(tunnel_rows),
                     "Static Routes": ", ".join(static_routes),
                 })
+
+                # Additive: one row per Customer LAN CIDR. Covers static
+                # routes declared on the IPSec connection (STATIC routing)
+                # and per-tunnel policy-based traffic selectors.
+                ipsec_name = getattr(connection, "display_name", "") or ""
+                ipsec_id = getattr(connection, "id", "") or ""
+                for cidr in getattr(connection, "static_routes", []) or []:
+                    rows.append({
+                        "Resource Type": "IPSec Customer LAN",
+                        "Name": cidr,
+                        "OCID": ipsec_id,
+                        "IPSec Name": ipsec_name,
+                        "IPSec OCID": ipsec_id,
+                        "Customer LAN CIDR": cidr,
+                        "Routing Type": "STATIC",
+                        "Tunnel": "",
+                    })
+                for tunnel in tunnels:
+                    routing = getattr(tunnel, "routing", "") or ""
+                    tunnel_name = getattr(tunnel, "display_name", "") or ""
+                    if routing.upper() == "POLICY":
+                        enc = getattr(tunnel, "encryption_domain_config", None)
+                        cpe_selectors = getattr(enc, "cpe_traffic_selector", []) if enc else []
+                        for cidr in cpe_selectors or []:
+                            rows.append({
+                                "Resource Type": "IPSec Customer LAN",
+                                "Name": cidr,
+                                "OCID": ipsec_id,
+                                "IPSec Name": ipsec_name,
+                                "IPSec OCID": ipsec_id,
+                                "Customer LAN CIDR": cidr,
+                                "Routing Type": "POLICY",
+                                "Tunnel": tunnel_name,
+                            })
             except Exception as exc:
                 logger.warning("Unable to inventory IPSec connection %s: %s", getattr(connection, "id", ""), exc)
         return rows

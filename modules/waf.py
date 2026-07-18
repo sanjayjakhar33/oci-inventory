@@ -36,6 +36,11 @@ class WAFCollector:
         rows.extend(self._collect_waas_certificates(compartment_id))
         rows.extend(self._collect_waas_custom_protection_rules(compartment_id))
         rows.extend(self._collect_waf_v2(compartment_id))
+        # Additive: unified "WAF Access Rule" rows with the schema documented
+        # in the requirements (Policy Name / WAF Name / Rule Name / Action /
+        # Priority / State / Condition / Description). Existing rows above
+        # remain unchanged.
+        rows.extend(self._collect_access_rules_flat(compartment_id))
         return rows
 
     # -----------------------------------------------------------------
@@ -493,6 +498,123 @@ class WAFCollector:
                 "Condition": getattr(rule, "condition", "") or "",
                 "Configurations": cfg_summary,
             })
+        return rows
+
+    # -----------------------------------------------------------------
+    # Unified Access Rules (both legacy WAAS and modern WAF v2)
+    # -----------------------------------------------------------------
+
+    def _collect_access_rules_flat(self, compartment_id: str) -> list[dict[str, Any]]:
+        """Emit one row per Access Rule with the required flat schema.
+
+        Fields: Resource Type, Policy Name, WAF Name, Rule Name, Action,
+        Priority, State, Condition, Description.
+
+        Covers OCI WAF v2 (`request_access_control.rules`) and legacy WAAS
+        (`list_access_rules`). Existing detailed rows for these entities
+        remain in place; this collector is additive.
+        """
+        rows: list[dict[str, Any]] = []
+
+        # --- Legacy WAAS -------------------------------------------------
+        try:
+            waas_policies = self._paginate(
+                self.manager.waas_client.list_waas_policies,
+                compartment_id=compartment_id,
+            )
+        except Exception as exc:
+            logger.warning("Unable to enumerate WAAS policies for access rules: %s", exc)
+            waas_policies = []
+
+        for policy in waas_policies:
+            policy_id = getattr(policy, "id", "")
+            policy_name = getattr(policy, "display_name", "")
+            policy_state = getattr(policy, "lifecycle_state", "")
+            try:
+                access_rules = self._paginate(
+                    self.manager.waas_client.list_access_rules,
+                    waas_policy_id=policy_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Unable to enumerate WAAS access rules for %s: %s", policy_id, exc
+                )
+                access_rules = []
+            for priority, rule in enumerate(access_rules, start=1):
+                rows.append({
+                    "Resource Type": "WAF Access Rule",
+                    "Policy Name": policy_name,
+                    "WAF Name": policy_name,
+                    "Rule Name": getattr(rule, "name", ""),
+                    "Action": getattr(rule, "action", "") or "",
+                    "Priority": priority,
+                    "State": policy_state,
+                    "Condition": str(getattr(rule, "criteria", "") or ""),
+                    "Description": "",
+                    "OCID": policy_id,
+                    "Source": "WAAS",
+                })
+
+        # --- WAF v2 ------------------------------------------------------
+        # Map policy_id -> WAF Name (first firewall attached to the policy)
+        policy_to_waf_name: dict[str, str] = {}
+        try:
+            firewalls = self._paginate(
+                self.manager.waf_client.list_web_app_firewalls,
+                compartment_id=compartment_id,
+            )
+        except Exception as exc:
+            logger.warning("Unable to enumerate WAF firewalls for access rules: %s", exc)
+            firewalls = []
+        for fw in firewalls:
+            pid = getattr(fw, "web_app_firewall_policy_id", "") or ""
+            if pid and pid not in policy_to_waf_name:
+                policy_to_waf_name[pid] = getattr(fw, "display_name", "") or ""
+
+        try:
+            v2_policies = self._paginate(
+                self.manager.waf_client.list_web_app_firewall_policies,
+                compartment_id=compartment_id,
+            )
+        except Exception as exc:
+            logger.warning("Unable to enumerate WAF v2 policies for access rules: %s", exc)
+            v2_policies = []
+
+        for policy in v2_policies:
+            policy_id = getattr(policy, "id", "")
+            policy_name = getattr(policy, "display_name", "")
+            policy_state = getattr(policy, "lifecycle_state", "")
+            try:
+                details = self.manager.waf_client.get_web_app_firewall_policy(
+                    web_app_firewall_policy_id=policy_id
+                ).data
+            except Exception as exc:
+                logger.warning(
+                    "Unable to fetch WAF v2 policy %s for access rules: %s", policy_id, exc
+                )
+                continue
+
+            for section_label, section in (
+                ("Request", getattr(details, "request_access_control", None)),
+                ("Response", getattr(details, "response_access_control", None)),
+            ):
+                if section is None:
+                    continue
+                for priority, rule in enumerate(getattr(section, "rules", []) or [], start=1):
+                    rows.append({
+                        "Resource Type": "WAF Access Rule",
+                        "Policy Name": policy_name,
+                        "WAF Name": policy_to_waf_name.get(policy_id, ""),
+                        "Rule Name": getattr(rule, "name", ""),
+                        "Action": getattr(rule, "action_name", "") or "",
+                        "Priority": priority,
+                        "State": policy_state,
+                        "Condition": getattr(rule, "condition", "") or "",
+                        "Description": getattr(rule, "type", "") or "",
+                        "OCID": policy_id,
+                        "Source": f"WAFv2-{section_label}",
+                    })
+
         return rows
 
     # -----------------------------------------------------------------

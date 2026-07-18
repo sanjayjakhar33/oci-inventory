@@ -33,6 +33,7 @@ for mod_name in [
 
 from modules.compute import ComputeCollector  # noqa: E402
 from modules.database import DatabaseCollector  # noqa: E402
+from modules.dns import DNSCollector  # noqa: E402
 from modules.network import NetworkCollector  # noqa: E402
 from modules.utils import InventoryCache  # noqa: E402
 from modules.vpn import VPNCollector  # noqa: E402
@@ -420,6 +421,220 @@ def test_private_ips_use_subnet_id():
     print("[OK] Private IPs enumerated per subnet_id")
 
 
+def test_dns_private_zones_and_records():
+    """Private DNS zones and DNS records are enumerated additively."""
+    mgr = _mgr_with_mocks()
+    pub_zone = SimpleNamespace(
+        id="ocid1.dns-zone..pub", name="example.com", scope="GLOBAL",
+        lifecycle_state="ACTIVE", resolution_mode="", view_id="",
+        zone_type="PRIMARY",
+    )
+    priv_zone = SimpleNamespace(
+        id="ocid1.dns-zone..priv", name="internal.example.com", scope="PRIVATE",
+        lifecycle_state="ACTIVE", resolution_mode="STANDARD",
+        view_id="ocid1.view..v", zone_type="PRIMARY",
+    )
+    priv_view = SimpleNamespace(
+        id="ocid1.view..v", display_name="private-view", scope="PRIVATE",
+        lifecycle_state="ACTIVE",
+    )
+    resolver = SimpleNamespace(
+        id="ocid1.resolver..r", display_name="rslv", scope="PRIVATE",
+        lifecycle_state="ACTIVE", attached_vcn_id="ocid1.vcn..vv",
+        default_view_id="ocid1.view..v",
+    )
+    resolver_details = SimpleNamespace(
+        attached_views=[SimpleNamespace(view_id="ocid1.view..v")],
+    )
+    record_a = SimpleNamespace(
+        domain="host.example.com", rtype="A", ttl=300, rdata="10.0.0.1",
+        is_protected=False,
+    )
+    record_priv = SimpleNamespace(
+        domain="db.internal.example.com", rtype="A", ttl=60,
+        rdata="10.0.1.5", is_protected=False,
+    )
+
+    def _list_zones(**kwargs):
+        if kwargs.get("scope") == "PRIVATE":
+            return _empty_response([priv_zone])
+        return _empty_response([pub_zone])
+
+    def _list_views(**kwargs):
+        if kwargs.get("scope") == "PRIVATE":
+            return _empty_response([priv_view])
+        return _empty_response([])
+
+    def _list_resolvers(**kwargs):
+        if kwargs.get("scope") == "PRIVATE":
+            return _empty_response([resolver])
+        return _empty_response([])
+
+    def _get_zone_records(**kwargs):
+        if kwargs.get("scope") == "PRIVATE":
+            return _empty_response([record_priv])
+        return _empty_response([record_a])
+
+    mgr.dns_client.list_zones = MagicMock(side_effect=_list_zones)
+    mgr.dns_client.list_views = MagicMock(side_effect=_list_views)
+    mgr.dns_client.list_resolvers = MagicMock(side_effect=_list_resolvers)
+    mgr.dns_client.get_zone_records = MagicMock(side_effect=_get_zone_records)
+    mgr.dns_client.get_resolver = MagicMock(return_value=SimpleNamespace(data=resolver_details))
+
+    rows = DNSCollector(mgr, InventoryCache()).collect("ocid1.compartment..c")
+
+    types_found = {r["Resource Type"] for r in rows}
+    assert "Zone" in types_found
+    assert "Private DNS Zone" in types_found
+    assert "DNS Record" in types_found
+    assert "Private DNS Record" in types_found
+
+    priv = [r for r in rows if r["Resource Type"] == "Private DNS Zone"][0]
+    assert priv["Name"] == "internal.example.com"
+    assert priv["Private View OCID"] == "ocid1.view..v"
+    assert priv["Private View Name"] == "private-view"
+    assert priv["Associated VCNs"] == "ocid1.vcn..vv"
+    assert priv["Resolution Mode"] == "STANDARD"
+
+    priv_rec = [r for r in rows if r["Resource Type"] == "Private DNS Record"][0]
+    assert priv_rec["Domain"] == "db.internal.example.com"
+    assert priv_rec["RType"] == "A"
+    assert priv_rec["RData"] == "10.0.1.5"
+
+    # get_zone_records was called with scope=PRIVATE for private zone
+    seen_scopes = {call.kwargs.get("scope") for call in mgr.dns_client.get_zone_records.call_args_list}
+    assert "PRIVATE" in seen_scopes
+    print("[OK] DNS private zones + records collected")
+
+
+def test_waf_access_rules_unified_row():
+    """A unified `WAF Access Rule` row with the required schema is emitted."""
+    mgr = _mgr_with_mocks()
+
+    # WAAS
+    waas_policy = SimpleNamespace(
+        id="ocid1.waas..p", display_name="waas-p", domain="app.example.com",
+        additional_domains=[], cname="", compartment_id="c", lifecycle_state="ACTIVE",
+    )
+    waas_details = SimpleNamespace(cname="", additional_domains=[], origins={})
+    mgr.waas_client.list_waas_policies = MagicMock(return_value=_empty_response([waas_policy]))
+    mgr.waas_client.get_waas_policy = MagicMock(return_value=SimpleNamespace(data=waas_details))
+    ac = SimpleNamespace(name="wa-1", action="ALLOW", block_action=None,
+                         block_response_code=None, bypass_challenges=[], criteria=[])
+    mgr.waas_client.list_access_rules = MagicMock(return_value=_empty_response([ac]))
+    mgr.waas_client.list_protection_rules = MagicMock(return_value=_empty_response([]))
+    mgr.waas_client.list_caching_rules = MagicMock(return_value=_empty_response([]))
+    mgr.waas_client.list_whitelists = MagicMock(return_value=_empty_response([]))
+    mgr.waas_client.list_captchas = MagicMock(return_value=_empty_response([]))
+    mgr.waas_client.list_certificates = MagicMock(return_value=_empty_response([]))
+    mgr.waas_client.list_custom_protection_rules = MagicMock(return_value=_empty_response([]))
+    mgr.waas_client.list_waas_policy_custom_protection_rules = MagicMock(return_value=_empty_response([]))
+    for m in ["get_device_fingerprint_challenge", "get_human_interaction_challenge",
+              "get_js_challenge", "get_waf_address_rate_limiting", "get_protection_settings"]:
+        setattr(mgr.waas_client, m, MagicMock(side_effect=Exception("skip")))
+
+    # WAF v2
+    fw = SimpleNamespace(
+        id="ocid1.waf..f", display_name="my-waf", backend_type="LOAD_BALANCER",
+        compartment_id="c", web_app_firewall_policy_id="ocid1.wafp..p",
+        lifecycle_state="ACTIVE",
+    )
+    mgr.waf_client.list_web_app_firewalls = MagicMock(return_value=_empty_response([fw]))
+    mgr.waf_client.get_web_app_firewall = MagicMock(
+        return_value=SimpleNamespace(data=SimpleNamespace(load_balancer_id=""))
+    )
+    policy = SimpleNamespace(id="ocid1.wafp..p", display_name="waf-policy",
+                             compartment_id="c", lifecycle_state="ACTIVE")
+    mgr.waf_client.list_web_app_firewall_policies = MagicMock(return_value=_empty_response([policy]))
+    ac_rule = SimpleNamespace(name="req-allow", type="ACCESS_CONTROL",
+                              action_name="allow", condition_language="JMESPATH",
+                              condition="i.startsWith('/api')")
+    ac_rule2 = SimpleNamespace(name="resp-deny", type="ACCESS_CONTROL",
+                               action_name="deny", condition_language="JMESPATH",
+                               condition="i.contains('secret')")
+    details = SimpleNamespace(
+        actions=[],
+        request_protection=None,
+        response_protection=None,
+        request_access_control=SimpleNamespace(rules=[ac_rule], default_action_name="allow"),
+        response_access_control=SimpleNamespace(rules=[ac_rule2]),
+        request_rate_limiting=None,
+    )
+    mgr.waf_client.get_web_app_firewall_policy = MagicMock(return_value=SimpleNamespace(data=details))
+    mgr.waf_client.list_network_address_lists = MagicMock(return_value=_empty_response([]))
+    mgr.waf_client.list_protection_capabilities = MagicMock(return_value=_empty_response([]))
+
+    rows = WAFCollector(mgr, InventoryCache()).collect("ocid1.compartment..c")
+    unified = [r for r in rows if r["Resource Type"] == "WAF Access Rule"]
+    assert len(unified) == 3, f"Expected 3 unified access rules, got {len(unified)}: {unified}"
+    # Required schema keys
+    required_keys = {"Resource Type", "Policy Name", "WAF Name", "Rule Name",
+                     "Action", "Priority", "State", "Condition", "Description"}
+    for r in unified:
+        missing = required_keys - set(r.keys())
+        assert not missing, f"Row missing keys {missing}: {r}"
+    # WAAS row
+    waas_ac = [r for r in unified if r["Source"] == "WAAS"][0]
+    assert waas_ac["Rule Name"] == "wa-1"
+    assert waas_ac["Action"] == "ALLOW"
+    assert waas_ac["Priority"] == 1
+    # WAF v2 rows: WAF Name resolved from firewall→policy map
+    wafv2_rows = [r for r in unified if r["Source"].startswith("WAFv2-")]
+    assert len(wafv2_rows) == 2
+    for r in wafv2_rows:
+        assert r["WAF Name"] == "my-waf"
+        assert r["Policy Name"] == "waf-policy"
+    print("[OK] Unified WAF Access Rule rows emitted with required schema")
+
+
+def test_ipsec_customer_lan_pools():
+    """IPSec Customer LAN CIDRs are enumerated as dedicated rows (STATIC + POLICY)."""
+    mgr = _mgr_with_mocks()
+    mgr.virtual_network_client.list_cpes = MagicMock(return_value=_empty_response([]))
+    connection = SimpleNamespace(
+        id="ocid1.ipsec..1", display_name="ipsec-1", cpe_id="ocid1.cpe..c",
+        drg_id="ocid1.drg..d", customer_bgp_asn=[],
+        static_routes=["10.10.0.0/16", "192.168.1.0/24"],
+    )
+    mgr.virtual_network_client.list_ip_sec_connections = MagicMock(return_value=_empty_response([connection]))
+    tunnel_policy = SimpleNamespace(
+        id="tunnel-1", display_name="t1", lifecycle_state="AVAILABLE",
+        vpn_ip="1.1.1.1", route_tables=None, routing="POLICY",
+        encryption_domain_config=SimpleNamespace(
+            cpe_traffic_selector=["10.20.0.0/16"],
+            oracle_traffic_selector=["10.30.0.0/16"],
+        ),
+    )
+    tunnel_bgp = SimpleNamespace(
+        id="tunnel-2", display_name="t2", lifecycle_state="AVAILABLE",
+        vpn_ip="2.2.2.2", route_tables=None, routing="BGP",
+        encryption_domain_config=None,
+    )
+    mgr.virtual_network_client.list_ip_sec_connection_tunnels = MagicMock(
+        return_value=_empty_response([tunnel_policy, tunnel_bgp])
+    )
+
+    rows = VPNCollector(mgr, InventoryCache()).collect("ocid1.compartment..c")
+    lan_rows = [r for r in rows if r["Resource Type"] == "IPSec Customer LAN"]
+    # 2 static-route rows + 1 policy CPE selector row = 3
+    assert len(lan_rows) == 3, f"Expected 3 Customer LAN rows, got {len(lan_rows)}: {lan_rows}"
+    static_cidrs = {r["Customer LAN CIDR"] for r in lan_rows if r["Routing Type"] == "STATIC"}
+    assert static_cidrs == {"10.10.0.0/16", "192.168.1.0/24"}
+    policy_rows = [r for r in lan_rows if r["Routing Type"] == "POLICY"]
+    assert len(policy_rows) == 1
+    assert policy_rows[0]["Customer LAN CIDR"] == "10.20.0.0/16"
+    assert policy_rows[0]["Tunnel"] == "t1"
+    # Required columns present
+    required = {"Resource Type", "IPSec Name", "IPSec OCID",
+                "Customer LAN CIDR", "Routing Type", "Tunnel"}
+    for r in lan_rows:
+        assert required.issubset(set(r.keys())), f"missing cols in {r}"
+    # Existing IPSec Connection row is still emitted (no regression)
+    conn_rows = [r for r in rows if r["Resource Type"] == "IPSec Connection"]
+    assert len(conn_rows) == 1
+    print("[OK] IPSec Customer LAN CIDR rows emitted (STATIC + POLICY)")
+
+
 if __name__ == "__main__":
     test_network_nsg_rules_use_correct_sdk_call()
     test_network_route_table_uses_rt_id()
@@ -428,4 +643,7 @@ if __name__ == "__main__":
     test_database_uses_compartment_scoped_apis()
     test_waf_collector_emits_child_rows()
     test_private_ips_use_subnet_id()
+    test_dns_private_zones_and_records()
+    test_waf_access_rules_unified_row()
+    test_ipsec_customer_lan_pools()
     print("\nAll smoke tests passed")
